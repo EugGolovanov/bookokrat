@@ -82,7 +82,7 @@ at the bottom of this document for the syntax.
 │  Space+d       Show book statistics popup                                   │
 │  Space+o       Open current book in system viewer                           │
 │  Space+l       Lookup selected text (run configured shell command)          │
-│  F4 / Space+A  Switch Contents / Assistant (also works in zen mode)         │
+│  Space+y       Open the Assistant tab (overlay in zen mode)                 │
 │  Space+w       Toggle file watching / auto-reload (PDF)                     │
 │  Space+D       Toggle single / dual layout (EPUB columns or PDF pages)      │
 │  Space+S       Toggle scroll / page render mode (PDF, Kitty only)           │
@@ -488,21 +488,20 @@ PDF annotations require a graphics-capable terminal.
     Install OMP (RPC support; developed with 19.1.1) and put omp on PATH.
     OMP is optional: browsing, reading and shell lookup do not require it.
 
-    Select text and press F4, or Space followed by uppercase A. Review the
+    Select text and press Space followed by lowercase y. Review the
     quote before pressing Enter; Ctrl+x removes it. Without a selection,
     only your question is used. Merely opening the tab sends nothing.
-    F4 switches back; Tab focuses the book. In zen mode Esc closes the
+    Esc switches back; Tab focuses the book. In zen mode Esc closes the
     overlay without leaving zen. Hiding the assistant does not stop work.
     Ctrl+c cancels a request. PgUp/PgDn scroll the answer.
-    To rebind the switch, map toggle_assistant in both the global and
-    assistant keybinding contexts. Printable keys normally type in the composer.
+    To change the opening shortcut, bind toggle_assistant in the global
+    keybinding context. Spaces and y type normally inside the composer.
 
-    Plain questions are independent. No tools, saved session, prior turns or
-    cache warming. For verified cache opt-out, configure a direct Anthropic
-    Messages model, e.g. BOOKOKRAT_CHAT_MODEL=anthropic/claude-sonnet-4-6
-    and ANTHROPIC_API_KEY in the reader's environment. Unsupported routes
-    are refused before sending. Cache opt-out is not a provider data-deletion
-    guarantee. Answers and drafts remain visible in memory for the open book.
+    Bookokrat runs the omp executable on PATH with its configured model and
+    login. Plain questions start fresh: no tools, saved session, previous
+    turns or cache warming. Bookokrat requests no prompt caching; providers
+    that cache automatically may still do so. Answers and drafts stay
+    visible in the reader for the open book.
 
     /agent followed by a task uses your trusted OMP profile, model and credentials.
     Further /agent turns resume that book's session, including after restart;

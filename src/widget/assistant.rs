@@ -555,12 +555,8 @@ mod tests {
         let map = default_keymap();
         let bindings = map.context(KeyContext::Assistant).unwrap();
         let mut covered = HashSet::new();
-        // These three actions are dispatched by App, covered in keybinding_actions.rs.
-        for (notation, action) in [
-            ("<F4>", Action::ToggleAssistant),
-            ("<Tab>", Action::SwitchFocus),
-            ("<Esc>", Action::Cancel),
-        ] {
+        // App dispatches focus and dismissal; see keybinding_actions.rs.
+        for (notation, action) in [("<Tab>", Action::SwitchFocus), ("<Esc>", Action::Cancel)] {
             let key = parse_key_binding(notation).unwrap();
             assert_eq!(bindings.lookup(key.keys()), LookupResult::Found(action));
             covered.insert(key);

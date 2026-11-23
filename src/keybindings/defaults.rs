@@ -126,8 +126,7 @@ fn global_specifics(keymap: &mut Keymap) {
     bind!(ctx, "<Space>C" => Action::CopyTocItem);
     bind!(ctx, "<Space>j" => Action::ToggleJustifyText);
     bind!(ctx, "<Space>a" => Action::ToggleCommentsViewer);
-    bind!(ctx, "<Space>A" => Action::ToggleAssistant);
-    bind!(ctx, "<F4>" => Action::ToggleAssistant);
+    bind!(ctx, "<Space>y" => Action::ToggleAssistant);
     bind!(ctx, "<Space>i" => Action::ToggleInlineAnnotations);
     bind!(ctx, "<Space>k" => Action::PeekAnnotation);
     bind!(ctx, "<Space>s" => Action::OpenSettings);
@@ -152,7 +151,6 @@ fn global_specifics(keymap: &mut Keymap) {
 
 fn assistant_specifics(keymap: &mut Keymap) {
     let ctx = keymap.context_mut(KeyContext::Assistant);
-    bind!(ctx, "<F4>" => Action::ToggleAssistant);
     bind!(ctx, "<Tab>" => Action::SwitchFocus);
     bind!(ctx, "<Esc>" => Action::Cancel);
     bind!(ctx, "<CR>" => Action::AssistantSubmit);

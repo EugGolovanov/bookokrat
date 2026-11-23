@@ -332,7 +332,7 @@ impl App {
             return format!(
                 "{}: Cancel request | {}: Hide assistant",
                 key(Action::AssistantCancel),
-                key(Action::ToggleAssistant)
+                key(Action::Cancel)
             );
         }
         format!(
@@ -340,7 +340,7 @@ impl App {
             key(Action::AssistantSubmit),
             key(Action::AssistantCancel),
             key(Action::AssistantRemoveQuote),
-            key(Action::ToggleAssistant)
+            key(Action::Cancel)
         )
     }
 }

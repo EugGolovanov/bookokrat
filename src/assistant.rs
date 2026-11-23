@@ -462,7 +462,7 @@ fn advance(
                 t.preflight(send)?;
             } else if state {
                 match t.mode {
-                    Mode::Chat => launch::check_chat_model(&f["data"])?,
+                    Mode::Chat => launch::check_chat_state(&f["data"])?,
                     Mode::Agent => launch::check_agent_tools(&f["data"])?,
                 }
                 t.send_prompt(send)?;
@@ -612,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_model_never_receives_the_passage() {
+    fn missing_configured_model_never_receives_the_passage() {
         let (mut t, _rx) = turn(Mode::Chat);
         let mut out = Vec::new();
         receive(
@@ -629,7 +629,7 @@ mod tests {
         .unwrap();
         let err = receive(
             &mut t,
-            json!({"type":"response","command":"get_state","id":"state","success":true,"data":{"model":{"provider":"unknown"}}}),
+            json!({"type":"response","command":"get_state","id":"state","success":true,"data":{"model":null,"dumpTools":[],"messageCount":0}}),
             &mut out,
         );
         assert!(err.is_err());

@@ -70,6 +70,8 @@ key t
 wait 150
 
 # Catppuccin Mocha is 1 down from Oceanic Next
+key g
+key g
 key j
 wait 120
 return

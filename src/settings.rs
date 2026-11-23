@@ -100,14 +100,14 @@ impl PdfPageLayoutMode {
     }
 }
 
-/// EPUB column layout mode (two-page spread in zen mode)
+/// EPUB column layout mode (two-page spread when the reader pane is wide enough)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum EpubColumnMode {
     /// Single column of text
-    #[default]
     Single,
     /// Two columns side by side (book spread)
+    #[default]
     Dual,
 }
 
@@ -140,7 +140,7 @@ pub struct Settings {
     #[serde(default)]
     pub margin: u16,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub transparent_background: bool,
 
     #[serde(default = "default_pdf_scale")]
@@ -226,7 +226,7 @@ impl Default for Settings {
             version: CURRENT_VERSION,
             theme: default_theme(),
             margin: 0,
-            transparent_background: false,
+            transparent_background: default_true(),
             pdf_scale: default_pdf_scale(),
             pdf_pan_shift: 0,
             pdf_render_mode: PdfRenderMode::default(),

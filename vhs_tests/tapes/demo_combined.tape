@@ -59,6 +59,8 @@ key space
 wait 150
 key t
 wait 400
+key g
+key g
 repeat_key j 4 0.15
 wait 200
 return

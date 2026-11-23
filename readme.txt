@@ -15,6 +15,7 @@
 
   [READING]
     ▸ EPUB: rich rendering (MathML, code, tables, images, links)
+    ▸ EPUB: two-page spread by default; one page when the reader is too narrow
     ▸ EPUB: adjustable content margins and text justification
     ▸ PDF: true rendering with page/scroll modes + zoom (graphics terminal)
     ▸ PDF: single/dual page layout and scroll/page mode switchers
@@ -82,7 +83,7 @@ at the bottom of this document for the syntax.
 │  Space+o       Open current book in system viewer                           │
 │  Space+l       Lookup selected text (run configured shell command)          │
 │  Space+w       Toggle file watching / auto-reload (PDF)                     │
-│  Space+D       Toggle single / dual page layout (PDF)                       │
+│  Space+D       Toggle single / dual layout (EPUB columns or PDF pages)      │
 │  Space+S       Toggle scroll / page render mode (PDF, Kitty only)           │
 │  Space+g       Jump to page number (PDF)                                    │
 │  Space+a       Open comments/annotations viewer                             │

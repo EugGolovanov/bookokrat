@@ -8,12 +8,21 @@ wait 1000
 key space
 key z
 wait 400
-desc Default: opaque, themed, image inversion ON. Expect: dark paper, theme-coloured text, gradient in original colours.
+# Establish the opaque reference: Themes > last option (Transparent) > up (Theme color).
+key space
+key t
+wait 400
+key G
+key k
+return
+escape
+wait 600
+desc Opaque, themed, image inversion ON. Expect: dark paper, theme-coloured text, gradient in original colours.
 screenshot tb_opaque_themed
 
 key I
 wait 500
-desc Default: opaque, theming OFF (I). Expect: classic WHITE page, black text, original gradient.
+desc Opaque, theming OFF (I). Expect: classic WHITE page, black text, original gradient.
 screenshot tb_opaque_original
 
 key I

@@ -3,9 +3,7 @@ use bookokrat::comments::{AnnotationBody, Comment, CommentTarget};
 use bookokrat::main_app::{ChapterDirection, FPSCounter, OpenPosition};
 use bookokrat::settings::{RuntimeSettings, Settings};
 use bookokrat::simple_fake_books::FakeBookConfig;
-use bookokrat::test_utils::test_helpers::{
-    create_test_app_with_custom_fake_books, create_test_terminal,
-};
+use bookokrat::test_utils::test_helpers::{TempBookManager, create_test_terminal};
 use bookokrat::theme::set_theme_by_index;
 // SVG snapshot tests using snapbox
 use bookokrat::{App, FocusedPanel, MainPanel};
@@ -20,7 +18,7 @@ mod snapshot_assertions;
 mod svg_generation;
 mod test_report;
 use snapshot_assertions::assert_svg_snapshot;
-use svg_generation::terminal_to_svg;
+use svg_generation::{snapshot_settings, terminal_to_svg};
 
 static INIT: Once = Once::new();
 
@@ -42,7 +40,7 @@ fn annotation_reader_fixture(
         BookComments::new(&dir.path().join("annotations.epub"), Some(dir.path())).unwrap();
     let settings = RuntimeSettings::in_memory(Settings {
         show_inline_annotations: inline,
-        ..Settings::default()
+        ..snapshot_settings()
     });
     let mut reader = AnnotationReader::new_without_image_support(settings);
     reader.set_book_comments(Arc::new(Mutex::new(comments)));
@@ -614,6 +612,30 @@ fn ensure_test_report_initialized() {
     });
 }
 
+fn content_snapshot_app(book_dir: &TempDir, comments_dir: &TempDir) -> App {
+    App::new_with_config_and_settings(
+        Some(book_dir.path().to_str().unwrap()),
+        None,
+        false,
+        Some(comments_dir.path()),
+        None,
+        RuntimeSettings::in_memory(snapshot_settings()),
+    )
+}
+
+fn snapshot_app_with_fake_books(configs: &[FakeBookConfig]) -> (App, TempBookManager) {
+    let books = TempBookManager::new_with_configs(configs).expect("create snapshot books");
+    let app = App::new_with_config_and_settings(
+        Some(&books.get_directory()),
+        Some("/dev/null"),
+        false,
+        None,
+        None,
+        RuntimeSettings::in_memory(snapshot_settings()),
+    );
+    (app, books)
+}
+
 fn create_test_app_isolated() -> (App, TempDir) {
     set_theme_by_index(0);
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
@@ -623,7 +645,7 @@ fn create_test_app_isolated() -> (App, TempDir) {
         false,
         Some(comments_dir.path()),
         None,
-        RuntimeSettings::in_memory(Settings::default()),
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
     // Force graphics support so PDFs show up regardless of sandbox env vars.
     app.book_manager.supports_graphics = true;
@@ -839,7 +861,7 @@ fn test_fake_books_file_list_svg() {
         },
     ];
 
-    let (mut app, _temp_manager) = create_test_app_with_custom_fake_books(&book_configs);
+    let (mut app, _temp_manager) = snapshot_app_with_fake_books(&book_configs);
 
     app.press_key(crossterm::event::KeyCode::Enter); // Select first book (Digital Frontier)
     app.press_key(crossterm::event::KeyCode::Tab); // Switch to content view
@@ -962,13 +984,7 @@ fn test_inline_comment_rendering_svg() {
     std::fs::write(&temp_html_path, html_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -1053,13 +1069,7 @@ fn test_section_nested_paragraph_comment_svg() {
     std::fs::write(&temp_html_path, html_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -1145,13 +1155,7 @@ fn test_list_comment_rendering_svg() {
     std::fs::write(&temp_html_path, html_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -1288,13 +1292,7 @@ fn test_quote_and_code_comment_rendering_svg() {
     std::fs::write(&temp_html_path, html_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -1420,13 +1418,7 @@ fn test_list_comment_rendering_complex_svg() {
     std::fs::write(&temp_html_path, html_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -1676,7 +1668,7 @@ fn test_dual_column_page_grid_svg() {
     set_theme_by_index(0);
     let settings = Settings {
         epub_column_mode: bookokrat::settings::EpubColumnMode::Dual,
-        ..Settings::default()
+        ..snapshot_settings()
     };
 
     // A single chapter of contiguous, numbered, non-wrapping lines so the
@@ -3457,13 +3449,7 @@ fn test_mathml_content_rendering_svg() {
     std::fs::write(&temp_html_path, mathml_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -3620,12 +3606,13 @@ fn test_book_reading_history_with_many_entries_svg() {
 
     // Now reload the app to pick up the bookmarks
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = bookokrat::App::new_with_config(
+    let mut app = App::new_with_config_and_settings(
         Some(&temp_manager.get_directory()),
         Some(&bookmark_path.to_string_lossy()),
         false,
         Some(comments_dir.path()),
         None,
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
 
     // Now show the reading history popup with capital H
@@ -3715,13 +3702,7 @@ fn test_headings_h1_to_h6_rendering_svg() {
     std::fs::write(&temp_html_path, headings_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -3823,13 +3804,7 @@ fn test_table_with_links_and_linebreaks_svg() {
     std::fs::write(&temp_html_path, table_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -3990,13 +3965,7 @@ fetchData('https://api.example.com/data')
     std::fs::write(&temp_html_path, basic_elements_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4064,13 +4033,7 @@ fn test_epub_type_attributes_svg() {
     std::fs::write(&temp_html_path, epub_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4153,13 +4116,7 @@ fn test_complex_table_with_code_and_linebreaks_svg() {
     std::fs::write(&temp_html_path, table_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4222,13 +4179,7 @@ Q = xW<sub>Q</sub></pre>
     std::fs::write(&temp_html_path, subscript_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4336,13 +4287,7 @@ fn test_definition_list_with_complex_content_svg() {
     std::fs::write(&temp_html_path, dl_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4577,13 +4522,7 @@ fn test_lists_with_tables_svg() {
     std::fs::write(&temp_html_path, list_table_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -4679,13 +4618,7 @@ hello_world()</code></pre>
     std::fs::write(&temp_html_path, search_content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     // Load the test document
     open_first_book(&mut app);
@@ -4743,7 +4676,7 @@ fn test_toc_search_svg() {
         words_per_chapter: 50,
     }];
 
-    let (mut app, _temp_manager) = create_test_app_with_custom_fake_books(&book_configs);
+    let (mut app, _temp_manager) = snapshot_app_with_fake_books(&book_configs);
 
     // Select and open the book to show TOC
     app.press_key(crossterm::event::KeyCode::Enter);
@@ -5129,13 +5062,7 @@ fn test_normal_mode_visual_selection_yank_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5203,13 +5130,7 @@ fn test_epub_highlight_palette_modal_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5276,13 +5197,7 @@ fn test_epub_highlight_palette_from_mouse_selection_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5388,13 +5303,7 @@ fn test_epub_highlights_all_colors_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5481,13 +5390,7 @@ fn test_epub_highlight_after_line_break_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5580,13 +5483,7 @@ fn test_epub_highlight_whole_paragraph_via_visual_line_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -5683,13 +5580,7 @@ fn test_multi_slice_highlight_overview_shape_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
     terminal
@@ -5809,13 +5700,7 @@ fn test_multi_slice_across_list_item_and_paragraph_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
     terminal
@@ -5953,13 +5838,7 @@ fn test_multi_slice_overlap_in_visual_mode_replaces_existing_highlight_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
     terminal
@@ -6108,13 +5987,7 @@ fn test_highlight_palette_finds_multi_slice_under_cursor_past_first_slice_length
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6184,13 +6057,7 @@ fn test_epub_highlight_across_two_paragraphs_via_visual_line_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6318,13 +6185,7 @@ fn test_epub_comment_across_two_paragraphs_via_visual_line_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6438,13 +6299,7 @@ fn test_comment_input_placement_from_visual_selection_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6520,13 +6375,7 @@ fn test_normal_mode_jump_to_bottom_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6598,13 +6447,7 @@ fn test_normal_mode_counted_motion_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6692,13 +6535,7 @@ fn test_image_inside_anchor_link_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -6843,12 +6680,13 @@ fn test_image_adaptive_viewport_height_svg() {
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
     let image_cache_dir = TempDir::new().expect("Failed to create temp image cache dir");
-    let mut app = App::new_with_config(
+    let mut app = App::new_with_config_and_settings(
         Some(temp_dir.path().to_str().unwrap()),
         Some("/dev/null"),
         false,
         Some(comments_dir.path()),
         Some(image_cache_dir.path().to_path_buf()),
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
 
     open_first_book(&mut app);
@@ -6959,13 +6797,7 @@ fn test_visual_mode_comment_selection_includes_cursor_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -7057,13 +6889,7 @@ fn test_list_comment_target_stable_in_zen_margin_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
     app.focused_panel = FocusedPanel::Main(MainPanel::Content);
@@ -7369,13 +7195,7 @@ fn test_search_with_justified_text_svg() {
     set_theme_by_index(0);
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
-        Some(temp_dir.path().to_str().unwrap()),
-        None,
-        false,
-        Some(comments_dir.path()),
-        None,
-    );
+    let mut app = content_snapshot_app(&temp_dir, &comments_dir);
 
     open_first_book(&mut app);
 
@@ -7449,12 +7269,13 @@ fn test_div_with_inline_content_svg() {
     std::fs::write(&temp_html_path, content).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
+    let mut app = App::new_with_config_and_settings(
         Some(temp_dir.path().to_str().unwrap()),
         Some("/dev/null"),
         false,
         Some(comments_dir.path()),
         None,
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
 
     app.press_key(crossterm::event::KeyCode::Enter);
@@ -7989,7 +7810,7 @@ fn test_pdf_enhance_capped_hud_svg() {
         false,
         None,
         "test-doc".to_string(),
-        RuntimeSettings::in_memory(Settings::default()),
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
 
     // Enhanced frame as the worker returns it for a 612x792pt page in a
@@ -8032,7 +7853,7 @@ fn test_pdf_enhance_capped_hud_svg() {
             let mut pending_display = None;
             let mut bookmarks = bookokrat::bookmarks::Bookmarks::load_or_ephemeral(None);
             let mut last_save = std::time::Instant::now();
-            let mut toc = TableOfContents::new(RuntimeSettings::in_memory(Settings::default()));
+            let mut toc = TableOfContents::new(RuntimeSettings::in_memory(snapshot_settings()));
             state.render_in_area(
                 f,
                 area,
@@ -8100,7 +7921,7 @@ fn create_book_search_test_app() -> (App, bookokrat::test_utils::test_helpers::T
         chapter_count: 12,
         words_per_chapter: 120,
     }];
-    let (mut app, temp_manager) = create_test_app_with_custom_fake_books(&book_configs);
+    let (mut app, temp_manager) = snapshot_app_with_fake_books(&book_configs);
     app.press_key(crossterm::event::KeyCode::Enter); // open the only book
     (app, temp_manager)
 }
@@ -8288,12 +8109,13 @@ fn test_reading_history_navigation_svg() {
     std::fs::write(&bookmark_path, serde_json::to_string_pretty(&root).unwrap()).unwrap();
 
     let comments_dir = TempDir::new().expect("Failed to create temp comments dir");
-    let mut app = App::new_with_config(
+    let mut app = App::new_with_config_and_settings(
         Some(&temp_manager.get_directory()),
         Some(&bookmark_path.to_string_lossy()),
         false,
         Some(comments_dir.path()),
         None,
+        RuntimeSettings::in_memory(snapshot_settings()),
     );
 
     app.press_key(crossterm::event::KeyCode::Char(' '));

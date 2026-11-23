@@ -109,6 +109,10 @@ bookokrat path/to/book.epub --no-images   # text only; PDF and DJVU can't be ope
 
 Press `?` inside the app to open the built-in help.
 
+EPUBs open in a two-page spread when the reader pane has at least 67 usable columns. Narrower panes show one page. Press `Space` then `D` to switch layouts, or `Space` then `z` to give the reader the full window.
+
+By default, Bookokrat uses the terminal background and its own theme for text and highlights. For a solid background, press `Space` then `t` and select **Background → Theme color**. Existing layout and background choices are preserved.
+
 ## SyncTeX (LaTeX ↔ PDF)
 
 Bookokrat supports bidirectional SyncTeX navigation between LaTeX sources and PDF output. Compile your LaTeX document with `pdflatex --synctex=1` (or equivalent) to generate a `.synctex.gz` sidecar file. When a PDF is opened and its sidecar is found, SyncTeX activates automatically.
@@ -151,6 +155,8 @@ PDF and DJVU viewing require a graphics-capable terminal.
 - Best experience: Kitty, Ghostty
 - Good: iTerm2, WezTerm, Warp, Konsole (with some limitations)
 - Terminals without graphics protocol support - EPUB support without images. PDFs and DJVUs are not supported
+
+EPUB text uses the terminal's font. In WezTerm, change `config.font` or `config.font_size` in `wezterm.lua`; Bookokrat has no separate font setting. If increasing the font size leaves room for only one page, widen the window or switch to zen mode.
 
 For protocol details and troubleshooting, see the in-app help (`?`) and [`readme.txt`](readme.txt).
 

@@ -180,6 +180,8 @@ key t
 wait 500
 
 # Move to Catppuccin Mocha (1 down from Oceanic Next)
+key g
+key g
 key j
 wait 300
 

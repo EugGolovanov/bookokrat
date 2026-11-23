@@ -77,6 +77,8 @@ key t
 wait 400
 
 # Rosepine Moon is 4 down from Oceanic Next
+key g
+key g
 repeat_key j 4 0.15
 wait 200
 return

@@ -8,6 +8,15 @@ wait 1000
 key space
 key z
 wait 400
+# Establish the opaque reference: Themes > last option (Transparent) > up (Theme color).
+key space
+key t
+wait 400
+key G
+key k
+return
+escape
+wait 600
 desc Opaque, themed, images inverted (default). Expect: dark paper, checker and gray ramp tinted to theme colours.
 screenshot st_opaque_inverted
 

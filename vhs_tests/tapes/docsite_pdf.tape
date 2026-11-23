@@ -12,7 +12,9 @@ wait 200
 key t
 wait 500
 
-# Navigate to Rosepine Moon (index 4): j j j j
+# Start at the first theme, then navigate to Rosepine Moon (index 4).
+key g
+key g
 key j
 key j
 key j

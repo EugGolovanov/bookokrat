@@ -1,5 +1,16 @@
+use bookokrat::settings::{EpubColumnMode, Settings};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+
+/// The reference SVGs use theme-colored paper and single-column text unless
+/// a scenario explicitly enables the two-page spread.
+pub fn snapshot_settings() -> Settings {
+    Settings {
+        transparent_background: false,
+        epub_column_mode: EpubColumnMode::Single,
+        ..Settings::default()
+    }
+}
 
 /// Convert terminal to SVG
 pub fn terminal_to_svg(terminal: &Terminal<TestBackend>) -> String {

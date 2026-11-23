@@ -60,6 +60,14 @@ pub enum Action {
     ExpandNavPanel,
     ResetNavPanelWidth,
 
+    // === Reader assistant ===
+    ToggleAssistant,
+    AssistantSubmit,
+    AssistantCancel,
+    AssistantApprove,
+    AssistantDeny,
+    AssistantRemoveQuote,
+
     // === Content operations ===
     AddComment,
     OpenHighlightPalette,
@@ -208,6 +216,12 @@ impl Action {
         Action::ShrinkNavPanel,
         Action::ExpandNavPanel,
         Action::ResetNavPanelWidth,
+        Action::ToggleAssistant,
+        Action::AssistantSubmit,
+        Action::AssistantCancel,
+        Action::AssistantApprove,
+        Action::AssistantDeny,
+        Action::AssistantRemoveQuote,
         Action::AddComment,
         Action::OpenHighlightPalette,
         Action::DeleteComment,
@@ -301,7 +315,13 @@ impl Action {
             Quit => "Quit the application",
             ForceRedraw => "Force a full-screen redraw",
             Suspend => "Suspend the process (job control)",
-            SwitchFocus => "Switch focus between nav panel and reader",
+            SwitchFocus => "Switch focus between the side panel and reader",
+            ToggleAssistant => "Switch between Contents and Assistant",
+            AssistantSubmit => "Send the assistant prompt (deny a pending approval)",
+            AssistantCancel => "Cancel the current assistant request",
+            AssistantApprove => "Approve the displayed agent action",
+            AssistantDeny => "Deny the pending agent action",
+            AssistantRemoveQuote => "Remove the selected passage from the prompt",
 
             // Navigation / movement
             MoveDown => "Move selection down one item",
@@ -506,6 +526,8 @@ mod tests {
                 OpenBookSearch | OpenBookSearchFresh | OpenSettings | OpenThemeSelector
                 | OpenExternalViewer => a,
                 ShrinkNavPanel | ExpandNavPanel | ResetNavPanelWidth => a,
+                ToggleAssistant | AssistantSubmit | AssistantCancel | AssistantApprove
+                | AssistantDeny | AssistantRemoveQuote => a,
                 AddComment | OpenHighlightPalette | DeleteComment => a,
                 CopySelection | CopyChapterText | CopyTocItem => a,
                 LookupSelection | PeekAnnotation | FollowLink => a,

@@ -1,5 +1,6 @@
 // Export modules for use in tests
 pub mod annotations;
+mod assistant;
 pub mod book_manager;
 pub mod bookmarks;
 pub mod clipboard;

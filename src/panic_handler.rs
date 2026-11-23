@@ -45,6 +45,7 @@ pub fn restore_terminal() {
         EndSynchronizedUpdate,
         LeaveAlternateScreen,
         DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste,
         Show
     );
     let _ = write!(io::stdout(), "\r\n");
@@ -61,6 +62,7 @@ fn restore_terminal_after_panic() {
         EndSynchronizedUpdate,
         LeaveAlternateScreen,
         DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste,
         Clear(ClearType::All),
         MoveTo(0, 0),
         Show

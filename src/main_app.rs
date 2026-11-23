@@ -1,3 +1,4 @@
+mod assistant_panel;
 use crate::book_manager::{BookFormat, BookManager};
 use crate::book_search::{BookSearch, BookSearchAction};
 use crate::book_stat::{BookStat, BookStatAction};
@@ -35,6 +36,7 @@ use crate::widget::highlight_palette::{
 use crate::widget::lookup_popup::{LookupPopup, LookupPopupAction};
 use crate::widget::marks_popup::{MarkScopeKey, MarksPopup, MarksPopupAction};
 use crate::widget::popup::Popup;
+use assistant_panel::ReaderAssistant;
 use image::GenericImageView;
 use log::warn;
 
@@ -247,6 +249,7 @@ const PDF_SCROLL_AXIS_SWITCH_MARGIN: usize = 3;
 pub struct App {
     pub book_manager: BookManager,
     pub navigation_panel: NavigationPanel,
+    assistant: ReaderAssistant,
     text_reader: MarkdownTextReader,
     home_context: LibraryContext,
     book_images: BookImages,
@@ -427,6 +430,7 @@ pub enum PopupWindow {
     CommentsViewer,
     Settings,
     Lookup,
+    Assistant,
     KeybindingErrors,
 }
 
@@ -750,6 +754,7 @@ impl App {
         let mut app = Self {
             book_manager,
             navigation_panel,
+            assistant: ReaderAssistant::default(),
             text_reader,
             home_context,
             book_images,
@@ -1228,6 +1233,7 @@ impl App {
     }
 
     pub fn switch_to_book_list_mode(&mut self) {
+        self.assistant.sidebar = false;
         self.navigation_panel.switch_to_book_mode();
         self.focused_panel = FocusedPanel::Main(MainPanel::NavigationList);
     }
@@ -1416,6 +1422,7 @@ impl App {
         );
         self.switch_to_toc_mode(&mut current_book);
 
+        self.assistant.change_book(Some(Path::new(path)));
         self.current_book = Some(current_book);
         self.update_content();
 
@@ -1737,6 +1744,7 @@ impl App {
         }
 
         self.pdf_service = Some(service);
+        self.assistant.change_book(Some(Path::new(path)));
         self.pdf_reader = Some(pdf_reader);
         self.pdf_document_path = Some(doc_path.clone());
         self.pdf_font_size = cell_size;
@@ -2709,6 +2717,9 @@ impl App {
 
     /// Handle non-scroll mouse events (clicks, drags, etc.)
     fn handle_non_scroll_mouse_event(&mut self, mouse_event: MouseEvent) {
+        if self.handle_assistant_mouse(mouse_event) {
+            return;
+        }
         match mouse_event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.clear_highlight_palette();
@@ -3364,6 +3375,9 @@ impl App {
         } else {
             scroll_amount
         };
+        if self.scroll_assistant(scroll_amount, column) {
+            return;
+        }
 
         if matches!(
             self.focused_panel,
@@ -4207,13 +4221,7 @@ impl App {
                 .constraints([Constraint::Length(nav_width), Constraint::Min(0)])
                 .split(chunks[0]);
 
-            self.navigation_panel.render(
-                f,
-                main_chunks[0],
-                self.is_main_panel(MainPanel::NavigationList),
-                current_theme(),
-                &self.book_manager,
-            );
+            self.render_navigation(f, main_chunks[0]);
 
             #[cfg(feature = "pdf")]
             if self.pdf_reader.is_some() {
@@ -4281,6 +4289,10 @@ impl App {
             }
         }
 
+        if self.assistant_overlay() {
+            let area = self.assistant_overlay_area();
+            self.assistant.widget.render(f, area, true, current_theme());
+        }
         if matches!(
             self.focused_panel,
             FocusedPanel::Popup(PopupWindow::ReadingHistory)
@@ -4576,6 +4588,9 @@ impl App {
         if click_x < area.x || click_x >= area.x + area.width {
             return false;
         }
+        if self.assistant_focused() {
+            return true; // In the composer the footer shows shortcuts, not buttons.
+        }
 
         let inner_x = click_x.saturating_sub(area.x + 1);
         let inner_y = click_y.saturating_sub(area.y + 1);
@@ -4661,6 +4676,8 @@ impl App {
                 "[{}] {} | {}: Dismiss",
                 level_str, notification.message, esc
             )
+        } else if self.assistant_focused() {
+            self.assistant_help()
         } else if self.is_in_search_mode() {
             let search_state = if self.navigation_panel.is_searching() {
                 self.navigation_panel.get_search_state()
@@ -4768,6 +4785,7 @@ impl App {
                     let sel = Self::key_for(ctx, Action::Select);
                     format!("{tab}/{hl}: Tabs | {jk}: Navigate | {sel}: Apply | {esc}: Close")
                 }
+                FocusedPanel::Popup(PopupWindow::Assistant) => self.assistant_help(),
                 FocusedPanel::Popup(PopupWindow::Lookup) => {
                     let ctx = KeyContext::PopupHelp;
                     let jk = Self::key_pair(ctx, Action::MoveDown, Action::MoveUp);
@@ -4808,6 +4826,9 @@ impl App {
                 .bg(self.theme_background()),
         );
         f.render_widget(left_para, inner_area);
+        if self.assistant_focused() {
+            return;
+        }
 
         let text_color = current_theme().base_03;
         let buttons = Self::help_bar_buttons();
@@ -4980,6 +5001,10 @@ impl App {
         use crate::keybindings::action::Action;
 
         match action {
+            Action::ToggleAssistant => {
+                self.toggle_assistant();
+                true
+            }
             Action::ToggleHelp => {
                 if let FocusedPanel::Main(panel) = self.focused_panel {
                     self.previous_main_panel = panel;
@@ -5442,18 +5467,7 @@ impl App {
                 true
             }
             Action::LookupSelection => {
-                let selected = if self.is_pdf_mode() {
-                    #[cfg(feature = "pdf")]
-                    {
-                        self.pdf_reader.as_ref().and_then(|r| r.get_selected_text())
-                    }
-                    #[cfg(not(feature = "pdf"))]
-                    {
-                        None
-                    }
-                } else {
-                    self.text_reader.get_selected_text()
-                };
+                let selected = self.reader_selection();
 
                 match selected {
                     Some(text) if !text.trim().is_empty() => {
@@ -5593,6 +5607,7 @@ impl App {
                         self.clear_synctex_state();
                         // Clear current book path since the PDF is no longer available
                         self.navigation_panel.current_book_path = None;
+                        self.assistant.change_book(None);
                         // Switch back to book list
                         self.navigation_panel.switch_to_book_mode();
                         self.focused_panel = FocusedPanel::Main(MainPanel::NavigationList);
@@ -6090,7 +6105,7 @@ impl App {
                             self.set_main_panel_focus(MainPanel::Content);
                         }
                         FocusedPanel::Main(MainPanel::Content) => {
-                            self.set_main_panel_focus(MainPanel::NavigationList);
+                            self.focus_navigation();
                         }
                         FocusedPanel::Popup(_) => {}
                     };
@@ -6199,6 +6214,10 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
+        if self.assistant_focused() {
+            self.assistant_key(key);
+            return None;
+        }
         let dismiss_peek =
             self.text_reader.is_annotation_peek_open() && self.key_sequence.is_empty() && {
                 use crate::keybindings::{
@@ -8356,11 +8375,21 @@ where
     let mut last_tick = std::time::Instant::now();
     let mut fps_counter = FPSCounter::new();
     let mut first_render = true; // Ensure we always render at least once on startup
+    let mut paste_enabled = false;
     if let Ok(area) = terminal.size() {
         app.terminal_size = area.into();
     }
     app.sync_terminal_title();
     loop {
+        let editing_assistant = app.assistant_focused();
+        if paste_enabled != editing_assistant {
+            if editing_assistant {
+                execute!(stdout(), crossterm::event::EnableBracketedPaste)?;
+            } else {
+                execute!(stdout(), crossterm::event::DisableBracketedPaste)?;
+            }
+            paste_enabled = editing_assistant;
+        }
         let mut events_processed = 0;
         let mut should_quit = false;
         fps_counter.tick();
@@ -8385,6 +8414,23 @@ where
                 continue;
             }
 
+            if let Event::Paste(text) = &event
+                && app.assistant_focused()
+            {
+                app.assistant.widget.paste(text);
+                continue;
+            }
+            #[cfg(feature = "pdf")]
+            if app.is_pdf_mode()
+                && app.assistant_focused()
+                && !app.assistant_overlay()
+                && let Event::Mouse(mouse) = &event
+                && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                && mouse.column > app.nav_panel_width()
+                && !app.should_route_pdf_mouse_to_ui(mouse)
+            {
+                app.set_main_panel_focus(MainPanel::Content);
+            }
             // Route events to PDF handler when in PDF mode AND (focused on PDF content OR popup is active)
             #[cfg(feature = "pdf")]
             if app.is_pdf_mode()
@@ -8447,7 +8493,7 @@ where
                             continue;
                         }
                         if key.code == KeyCode::Tab && !app.has_active_popup() && !app.zen_mode {
-                            app.set_main_panel_focus(MainPanel::NavigationList);
+                            app.focus_navigation();
                         }
                     }
                     Event::Resize(_, _) => {
@@ -8636,6 +8682,7 @@ where
         }
 
         if last_tick.elapsed() >= tick_rate {
+            needs_redraw |= app.poll_assistant();
             let highlight_changed = app.text_reader.update_highlight(); // Update highlight state
             let epub_hud_expired = app.text_reader.update_hud_message();
             let deferred_reload_started = app.text_reader.tick_deferred_image_reload();
@@ -8706,7 +8753,7 @@ where
                 .as_ref()
                 .and_then(|reader| reader.hud_message.as_ref())
                 .is_some();
-            if !hud_active {
+            if !hud_active && !app.assistant_visible() {
                 needs_redraw = false;
             }
         }

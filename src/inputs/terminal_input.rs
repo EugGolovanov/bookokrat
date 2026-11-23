@@ -87,6 +87,8 @@ pub struct TerminalInput {
     kitty_queue: VecDeque<KittyResponse>,
     /// Currently held mouse button (for distinguishing drag from move)
     mouse_button_held: Option<MouseButton>,
+    /// Bytes between bracketed-paste markers are data, never shortcuts or submit keys.
+    paste: Option<Vec<u8>>,
     /// Whether we've already tried reading more data after seeing incomplete sequence
     read_attempted_for_incomplete: bool,
 }
@@ -98,6 +100,7 @@ impl TerminalInput {
             event_queue: VecDeque::new(),
             kitty_queue: VecDeque::new(),
             mouse_button_held: None,
+            paste: None,
             read_attempted_for_incomplete: false,
         }
     }
@@ -225,6 +228,34 @@ impl TerminalInput {
     /// Process the buffer to extract events and Kitty responses.
     fn process_buffer(&mut self) {
         while !self.buffer.is_empty() {
+            const PASTE_START: &[u8] = b"\x1b[200~";
+            const PASTE_END: &[u8] = b"\x1b[201~";
+            if let Some(bytes) = &mut self.paste {
+                while let Some(byte) = self.buffer.pop_front() {
+                    bytes.push(byte);
+                    if byte == b'~' && bytes.ends_with(PASTE_END) {
+                        bytes.truncate(bytes.len() - PASTE_END.len());
+                        let bytes = self.paste.take().unwrap();
+                        let text = String::from_utf8(bytes).unwrap_or_else(|error| {
+                            String::from_utf8_lossy(error.as_bytes()).into_owned()
+                        });
+                        self.event_queue.push_back(Event::Paste(text));
+                        break;
+                    }
+                }
+                continue;
+            }
+            if self
+                .buffer
+                .iter()
+                .take(PASTE_START.len())
+                .copied()
+                .eq(PASTE_START.iter().copied())
+            {
+                self.buffer.drain(..PASTE_START.len());
+                self.paste = Some(Vec::new());
+                continue;
+            }
             // Check for Kitty response (starts with \x1b_G)
             if self.buffer.len() >= 3
                 && self.buffer[0] == 0x1b
@@ -730,6 +761,29 @@ impl super::event_source::EventSource for UnifiedEventSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assistant_bracketed_paste_is_data_across_partial_reads() {
+        let mut input = TerminalInput::new();
+        for chunk in [
+            b"\x1b[20".as_slice(),
+            b"0~/agent stop\r\n\x19\x1b",
+            b"[201",
+            b"~x",
+        ] {
+            input.buffer.extend(chunk);
+            input.process_buffer();
+        }
+        assert_eq!(
+            input.event_queue.pop_front(),
+            Some(Event::Paste("/agent stop\r\n\x19".into()))
+        );
+        assert_eq!(
+            input.event_queue.pop_front(),
+            Some(key_event(KeyCode::Char('x'), KeyModifiers::empty()))
+        );
+        assert!(input.event_queue.is_empty());
+    }
 
     #[test]
     fn test_kitty_response_parse() {

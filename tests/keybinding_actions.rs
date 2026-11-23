@@ -139,6 +139,21 @@ macro_rules! binding_tests {
 
 binding_tests! {
     // ── Global ───────────────────────────────────────
+    assistant_open_from_reader: KeyContext::Global, "<Space>A",
+        setup = |app, _dir| { open_book(&mut app); },
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::NavigationList);
+    assistant_open_in_zen: KeyContext::Global, "<F4>",
+        setup = |app, _dir| { open_book(&mut app); app.set_zen_mode(true); },
+        check = |app| app.focused_panel == FocusedPanel::Popup(PopupWindow::Assistant);
+    assistant_return_to_contents: KeyContext::Assistant, "<F4>",
+        setup = |app, _dir| { open_book(&mut app); simulate(&mut app, "<Space>A"); },
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::Content);
+    assistant_focus_reader: KeyContext::Assistant, "<Tab>",
+        setup = |app, _dir| { open_book(&mut app); simulate(&mut app, "<F4>"); },
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::Content);
+    assistant_dismiss_in_zen: KeyContext::Assistant, "<Esc>",
+        setup = |app, _dir| { open_book(&mut app); app.set_zen_mode(true); simulate(&mut app, "<F4>"); },
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::Content) && app.nav_panel_width() == 0;
     global_help: KeyContext::Global, "?",
         setup = |app, _dir| { open_book(&mut app); },
         check = |app| matches!(app.focused_panel, FocusedPanel::Popup(PopupWindow::Help));
@@ -1145,6 +1160,7 @@ fn every_default_binding_has_a_test() {
     let skip_contexts = [
         KeyContext::PdfStandard, // tested in keybinding_actions_pdf.rs
         KeyContext::PdfNormal,
+        KeyContext::Assistant, // full binding inventory exercised in widget::assistant
     ];
 
     // Bindings deliberately excluded from the table with documented reasons.

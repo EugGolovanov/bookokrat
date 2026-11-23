@@ -8,6 +8,7 @@ https://github.com/user-attachments/assets/0ebe61c6-4629-4bde-8bd4-50feb9a424a3
 
 - EPUB, PDF, and DJVU support in one TUI app
 - Split layout: library/TOC on the left, reader on the right
+- Optional OMP reading assistant: press `F4` to ask about a selection, including in Zen mode. Plain questions are disposable; `/agent` resumes work for the open book. See [setup and privacy](readme.txt).
 - Fast PDF/DJVU pipeline with Kitty SHM image transfer in supported terminals
 - Search, bookmarks, jump list history, reading stats
 - Inline comments/annotations with persistent storage and Markdown export; note bodies can be hidden and peeked on demand

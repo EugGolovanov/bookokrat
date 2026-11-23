@@ -141,7 +141,7 @@ fn apply_toml(content: &str, keymap: &mut Keymap, errors: &mut Vec<LoadError>) -
         let Some(group) = super::context::resolve_config_key(key) else {
             errors.push(LoadError::with_line(
                 find_context_line(content, key).unwrap_or(1),
-                format!("unknown context '{key}' (valid: global, nav, content, epub_normal, pdf, pdf_normal, popup.help, popup.history, popup.search, popup.stats, popup.comments, popup.settings, or groups all/normal/popup)"),
+                format!("unknown context '{key}' (valid: global, nav, content, epub_normal, pdf, pdf_normal, assistant, popup.help, popup.history, popup.search, popup.stats, popup.comments, popup.settings, popup.marks, or groups all/normal/popup)"),
             ));
             continue;
         };

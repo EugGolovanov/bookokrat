@@ -13,6 +13,7 @@ pub enum KeyContext {
     EpubNormal,
     PdfStandard,
     PdfNormal,
+    Assistant,
     PopupHelp,
     PopupHistory,
     PopupSearch,
@@ -25,7 +26,7 @@ pub enum KeyContext {
 /// Config file group keys that expand to multiple contexts.
 /// Groups are resolved at load time — the internal keymap is always per-context.
 pub enum ConfigGroup {
-    /// Applies to all contexts except Global.
+    /// Applies to navigation contexts (not Global or the assistant editor).
     All,
     /// Applies to EpubNormal + PdfNormal.
     Normal,
@@ -43,6 +44,7 @@ impl KeyContext {
         KeyContext::EpubNormal,
         KeyContext::PdfStandard,
         KeyContext::PdfNormal,
+        KeyContext::Assistant,
         KeyContext::PopupHelp,
         KeyContext::PopupHistory,
         KeyContext::PopupSearch,
@@ -61,6 +63,7 @@ impl KeyContext {
             KeyContext::EpubNormal => "epub_normal",
             KeyContext::PdfStandard => "pdf",
             KeyContext::PdfNormal => "pdf_normal",
+            KeyContext::Assistant => "assistant",
             KeyContext::PopupHelp => "popup.help",
             KeyContext::PopupHistory => "popup.history",
             KeyContext::PopupSearch => "popup.search",
@@ -80,7 +83,7 @@ impl KeyContext {
     }
 }
 
-/// Contexts that the `all` group expands to (everything except Global).
+/// The assistant composer must not inherit navigation commands on printable keys.
 pub const ALL_GROUP: &[KeyContext] = &[
     KeyContext::Navigation,
     KeyContext::EpubContent,
@@ -150,7 +153,7 @@ mod tests {
 
     #[test]
     fn all_variants_covered() {
-        assert_eq!(KeyContext::ALL.len(), 13);
+        assert_eq!(KeyContext::ALL.len(), 14);
     }
 
     #[test]

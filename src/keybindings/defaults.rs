@@ -44,6 +44,7 @@ pub fn default_keymap() -> Keymap {
     epub_normal_specifics(&mut keymap);
     pdf_specifics(&mut keymap);
     pdf_normal_specifics(&mut keymap);
+    assistant_specifics(&mut keymap);
     popup_help_specifics(&mut keymap);
     popup_history_specifics(&mut keymap);
     popup_search_specifics(&mut keymap);
@@ -125,6 +126,8 @@ fn global_specifics(keymap: &mut Keymap) {
     bind!(ctx, "<Space>C" => Action::CopyTocItem);
     bind!(ctx, "<Space>j" => Action::ToggleJustifyText);
     bind!(ctx, "<Space>a" => Action::ToggleCommentsViewer);
+    bind!(ctx, "<Space>A" => Action::ToggleAssistant);
+    bind!(ctx, "<F4>" => Action::ToggleAssistant);
     bind!(ctx, "<Space>i" => Action::ToggleInlineAnnotations);
     bind!(ctx, "<Space>k" => Action::PeekAnnotation);
     bind!(ctx, "<Space>s" => Action::OpenSettings);
@@ -145,6 +148,20 @@ fn global_specifics(keymap: &mut Keymap) {
     bind!(ctx, "<C-z>" => Action::ToggleZenMode);
     bind!(ctx, "<lt>" => Action::ShrinkNavPanel);
     bind!(ctx, "<gt>" => Action::ExpandNavPanel);
+}
+
+fn assistant_specifics(keymap: &mut Keymap) {
+    let ctx = keymap.context_mut(KeyContext::Assistant);
+    bind!(ctx, "<F4>" => Action::ToggleAssistant);
+    bind!(ctx, "<Tab>" => Action::SwitchFocus);
+    bind!(ctx, "<Esc>" => Action::Cancel);
+    bind!(ctx, "<CR>" => Action::AssistantSubmit);
+    bind!(ctx, "<C-c>" => Action::AssistantCancel);
+    bind!(ctx, "<C-y>" => Action::AssistantApprove);
+    bind!(ctx, "<C-n>" => Action::AssistantDeny);
+    bind!(ctx, "<C-x>" => Action::AssistantRemoveQuote);
+    bind!(ctx, "<PageUp>" => Action::ScrollPageUp);
+    bind!(ctx, "<PageDown>" => Action::ScrollPageDown);
 }
 
 fn nav_specifics(keymap: &mut Keymap) {

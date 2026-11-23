@@ -156,6 +156,8 @@ PDF and DJVU viewing require a graphics-capable terminal.
 - Good: iTerm2, WezTerm, Warp, Konsole (with some limitations)
 - Terminals without graphics protocol support - EPUB support without images. PDFs and DJVUs are not supported
 
+When Bookokrat uses the iTerm2 graphics protocol (including WezTerm), it keeps PDF pages as MuPDF drawing commands instead of caching full-page bitmaps. It rasterizes visible page regions as you read and reuses overlapping strips when you scroll. This is automatic: no optimizer, converted copy, or change to the original PDF is needed. Kitty, Sixel, and DjVu use their existing rendering paths.
+
 EPUB text uses the terminal's font. In WezTerm, change `config.font` or `config.font_size` in `wezterm.lua`; Bookokrat has no separate font setting. If increasing the font size leaves room for only one page, widen the window or switch to zen mode.
 
 For protocol details and troubleshooting, see the in-app help (`?`) and [`readme.txt`](readme.txt).

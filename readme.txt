@@ -484,9 +484,11 @@ PDF annotations require a graphics-capable terminal.
     {} is replaced with the selected text. lookup_display can be "popup"
     (capture output) or "fire_and_forget" (launch and forget).
 
-  [READING ASSISTANT / OMP]
-    Install OMP (RPC support; developed with 19.1.1) and put omp on PATH.
-    OMP is optional: browsing, reading and shell lookup do not require it.
+  [READING ASSISTANT / PI AND OMP]
+    Plain questions use pi; /agent tasks use omp. Install the executable for
+    each mode you want on PATH and log into that tool. Both are optional.
+    Tested with Pi 1.5.2 and OMP 19.1.1. The selected Pi model changes
+    Bookokrat chat only; it does not change the default in standalone Pi.
 
     Select text and press Space followed by lowercase y. Review the
     quote before pressing Enter; Ctrl+x removes it. Without a selection,
@@ -497,11 +499,14 @@ PDF annotations require a graphics-capable terminal.
     To change the opening shortcut, bind toggle_assistant in the global
     keybinding context. Spaces and y type normally inside the composer.
 
-    Bookokrat runs the omp executable on PATH with its configured model and
-    login. Plain questions start fresh: no tools, saved session, previous
-    turns or cache warming. Bookokrat requests no prompt caching; providers
-    that cache automatically may still do so. Answers and drafts stay
-    visible in the reader for the open book.
+    To choose a chat model, press Space+s and open Integrations, then Pi
+    reader model. The picker asks your installed Pi for its available models.
+    Select a provider/model and press Enter to save, or select Pi default to
+    use Pi's own selection. No model credentials are stored by Bookokrat.
+
+    Each plain question starts a fresh, tool-free Pi session with no saved
+    history. Pi and the provider may still cache prompt tokens; an ephemeral
+    session is not a provider cache opt-out. Answers stay visible for this book.
 
     /agent followed by a task uses your trusted OMP profile, model and credentials.
     Further /agent turns resume that book's session, including after restart;

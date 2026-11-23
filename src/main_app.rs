@@ -3378,6 +3378,12 @@ impl App {
         if self.scroll_assistant(scroll_amount, column) {
             return;
         }
+        if self.focused_panel == FocusedPanel::Popup(PopupWindow::Settings) {
+            if let Some(popup) = &mut self.settings_popup {
+                popup.scroll_pi_models(scroll_amount);
+            }
+            return;
+        }
 
         if matches!(
             self.focused_panel,
@@ -5046,13 +5052,8 @@ impl App {
                 true
             }
             Action::OpenSettings => {
-                #[cfg(feature = "pdf")]
-                {
-                    self.open_settings_popup();
-                    true
-                }
-                #[cfg(not(feature = "pdf"))]
-                false
+                self.open_settings_popup();
+                true
             }
             Action::ShrinkNavPanel => {
                 if !self.zen_mode && !self.has_active_popup() {
@@ -5493,7 +5494,6 @@ impl App {
         }
     }
 
-    #[cfg(feature = "pdf")]
     fn open_settings_popup(&mut self) {
         if let FocusedPanel::Main(panel) = self.focused_panel {
             self.previous_main_panel = panel;
@@ -8683,6 +8683,10 @@ where
 
         if last_tick.elapsed() >= tick_rate {
             needs_redraw |= app.poll_assistant();
+            needs_redraw |= app
+                .settings_popup
+                .as_mut()
+                .is_some_and(SettingsPopup::poll_pi_models);
             let highlight_changed = app.text_reader.update_highlight(); // Update highlight state
             let epub_hud_expired = app.text_reader.update_hud_message();
             let deferred_reload_started = app.text_reader.tick_deferred_image_reload();
@@ -8753,7 +8757,10 @@ where
                 .as_ref()
                 .and_then(|reader| reader.hud_message.as_ref())
                 .is_some();
-            if !hud_active && !app.assistant_visible() {
+            if !hud_active
+                && !app.assistant_visible()
+                && app.focused_panel != FocusedPanel::Popup(PopupWindow::Settings)
+            {
                 needs_redraw = false;
             }
         }

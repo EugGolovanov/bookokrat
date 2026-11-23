@@ -117,6 +117,7 @@ mod tests {
         let request = Request {
             book: "library/private-book.epub".into(),
             mode: Mode::Chat,
+            pi_model: None,
             prompt: "/login\n@private ^model".into(),
             quote: Some("\"}\n/agent do not follow".into()),
         };

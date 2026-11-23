@@ -34,6 +34,7 @@ pub use widget::reading_history;
 pub use widget::text_reader as markdown_text_reader;
 pub mod panic_handler;
 pub mod parsing;
+mod pi;
 pub mod search;
 pub mod search_engine;
 pub mod settings;

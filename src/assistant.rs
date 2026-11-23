@@ -1,4 +1,5 @@
 mod launch;
+mod pi_chat;
 mod process;
 mod protocol;
 
@@ -17,9 +18,19 @@ pub(crate) enum Mode {
     Agent,
 }
 
+impl Mode {
+    fn backend(self) -> &'static str {
+        match self {
+            Self::Chat => "Pi",
+            Self::Agent => "OMP",
+        }
+    }
+}
+
 pub(crate) struct Request {
     pub book: PathBuf,
     pub mode: Mode,
+    pub pi_model: Option<String>,
     pub prompt: String,
     pub quote: Option<String>,
 }
@@ -170,7 +181,7 @@ impl Worker {
         let (events, rx) = mpsc::channel();
         let tx = events.clone();
         let join = thread::Builder::new()
-            .name("bookokrat-omp".into())
+            .name("bookokrat-assistant".into())
             .spawn(move || Session::default().run(rx, tx))
             .map_err(|e| format!("Cannot start assistant worker: {e}"))?;
         Ok(Self { events, join })
@@ -189,7 +200,9 @@ enum Event {
 enum Phase {
     Ready,
     Filter,
+    SelectModel,
     Preflight,
+    AwaitingPrompt,
     Running,
     Settling,
 }
@@ -252,8 +265,11 @@ impl Turn {
             .take()
             .ok_or("Prompt was already sent")?;
         send(&prompt)?;
-        self.phase = Phase::Running;
-        self.status("Waiting for OMP");
+        self.phase = match self.mode {
+            Mode::Chat => Phase::AwaitingPrompt,
+            Mode::Agent => Phase::Running,
+        };
+        self.status(format!("Waiting for {}", self.mode.backend()));
         Ok(())
     }
 
@@ -267,6 +283,22 @@ impl Turn {
         self.streamed = true;
         self.prior_text = true;
         self.update(Update::Text(text.into()));
+    }
+
+    fn finish_text(&mut self, message: &Value) {
+        if !self.streamed
+            && let Some(blocks) = message["content"].as_array()
+        {
+            for block in blocks.iter().filter(|block| block["type"] == "text") {
+                if let Some(text) = block["text"].as_str() {
+                    self.text(text);
+                }
+            }
+        }
+        self.streamed = false;
+        if let Some(n) = message["usage"]["cacheRead"].as_u64() {
+            self.status(format!("Cache read: {n} tokens"));
+        }
     }
 }
 
@@ -282,17 +314,17 @@ impl Session {
     fn run(&mut self, inbox: Receiver<Event>, events: Sender<Event>) {
         loop {
             let event = if let Some(turn) = &self.turn
-                && matches!(turn.phase, Phase::Ready | Phase::Filter | Phase::Preflight)
+                && !matches!(turn.phase, Phase::Running | Phase::Settling)
             {
                 let left = turn.deadline.saturating_duration_since(Instant::now());
                 if left.is_zero() {
-                    self.fail("OMP request timed out".into());
+                    self.fail(format!("{} request timed out", turn.mode.backend()));
                     continue;
                 }
                 match inbox.recv_timeout(left) {
                     Ok(event) => event,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
-                        self.fail("OMP request timed out".into());
+                        self.fail(format!("{} request timed out", turn.mode.backend()));
                         continue;
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -357,15 +389,18 @@ impl Session {
         let process = match &mut self.process {
             Some(process) => process,
             slot @ None => {
-                turn.status("Starting OMP");
+                turn.status(format!("Starting {}", req.mode.backend()));
                 self.generation += 1;
                 let process = Process::spawn(&req.book, req.mode, self.generation, events.clone())?;
                 self.book = req.book;
                 slot.insert(process)
             }
         };
-        if req.mode == Mode::Agent {
-            turn.status(format!("Workspace: {}", process.launch.workspace.display()));
+        if req.mode == Mode::Chat {
+            return pi_chat::start(turn, req.pi_model.as_deref(), |frame| process.send(frame));
+        }
+        if let Some(workspace) = &process.launch.workspace {
+            turn.status(format!("Workspace: {}", workspace.display()));
         }
         if reuse {
             turn.preflight(|frame| process.send(frame))?;
@@ -379,7 +414,10 @@ impl Session {
                 if let Some(dialog) = &turn.dialog {
                     let _ = process.send(&protocol::cancel_dialog(&dialog.id));
                 }
-                if matches!(turn.phase, Phase::Running | Phase::Settling) {
+                if matches!(
+                    turn.phase,
+                    Phase::AwaitingPrompt | Phase::Running | Phase::Settling
+                ) {
                     let _ = process.send(&json!({"type":"abort"}));
                 }
             }
@@ -408,7 +446,15 @@ impl Session {
 
     fn frame(&mut self, f: &Value) -> Result<(), String> {
         let p = self.process.as_ref().unwrap();
-        let kind = f["type"].as_str().ok_or("Missing OMP frame type")?;
+        let kind = f["type"].as_str().ok_or("Missing assistant frame type")?;
+        if let Some(t) = &mut self.turn
+            && t.mode == Mode::Chat
+        {
+            if pi_chat::advance(t, kind, f, |frame| p.send(frame))? {
+                self.done()?;
+            }
+            return Ok(());
+        }
         match kind {
             "extension_ui_request" => return dialog(p, self.turn.as_mut(), f),
             "host_tool_call" => return p.send(&json!({"type":"host_tool_result", "id":f["id"], "isError":true, "result":{"content":[{"type":"text","text":"Bookokrat does not offer host tools"}]}})),
@@ -461,10 +507,7 @@ fn advance(
             if filter {
                 t.preflight(send)?;
             } else if state {
-                match t.mode {
-                    Mode::Chat => launch::check_chat_state(&f["data"])?,
-                    Mode::Agent => launch::check_agent_tools(&f["data"])?,
-                }
+                launch::check_agent_tools(&f["data"])?;
                 t.send_prompt(send)?;
             } else if prompt && f["data"]["agentInvoked"] == false {
                 return Err("OMP handled this question locally instead of invoking a model".into());
@@ -501,19 +544,7 @@ fn advance(
         }
         "message_end" if f["message"]["role"] == "assistant" => {
             let msg = &f["message"];
-            if !t.streamed
-                && let Some(blocks) = msg["content"].as_array()
-            {
-                for block in blocks.iter().filter(|b| b["type"] == "text") {
-                    if let Some(text) = block["text"].as_str() {
-                        t.text(text);
-                    }
-                }
-            }
-            t.streamed = false;
-            if let Some(n) = msg["usage"]["cacheRead"].as_u64() {
-                t.status(format!("Cache read: {n} tokens"));
-            }
+            t.finish_text(msg);
             if t.phase == Phase::Settling {
                 // A retry can succeed after a failed assistant message;
                 // only the final attempt determines the settled result.
@@ -571,8 +602,7 @@ fn dialog(p: &Process, turn: Option<&mut Turn>, f: &Value) -> Result<(), String>
     }
     let id = f["id"].as_str().ok_or("OMP UI request missing its id")?;
     if let Some(t) = turn {
-        if t.mode == Mode::Agent
-            && matches!(t.phase, Phase::Running | Phase::Settling)
+        if matches!(t.phase, Phase::Running | Phase::Settling)
             && t.dialog.is_none()
             && let Some(mut dialog) = Dialog::from_request(f)
         {
@@ -598,6 +628,7 @@ mod tests {
         let req = Request {
             book: "book.epub".into(),
             mode,
+            pi_model: None,
             prompt: "Explain".into(),
             quote: Some("private passage".into()),
         };
@@ -605,37 +636,115 @@ mod tests {
     }
 
     fn receive(t: &mut Turn, frame: Value, writes: &mut Vec<Value>) -> Result<bool, String> {
-        advance(t, frame["type"].as_str().unwrap(), &frame, |command| {
+        let kind = frame["type"].as_str().unwrap();
+        let write = |command: &Value| {
             writes.push(command.clone());
             Ok(())
+        };
+        match t.mode {
+            Mode::Chat => pi_chat::advance(t, kind, &frame, write),
+            Mode::Agent => advance(t, kind, &frame, write),
+        }
+    }
+
+    fn start_pi(model: Option<&str>) -> (Turn, Receiver<Delivery>, Vec<Value>) {
+        let (mut t, rx) = turn(Mode::Chat);
+        let mut out = Vec::new();
+        pi_chat::start(&mut t, model, |v| {
+            out.push(v.clone());
+            Ok(())
         })
+        .unwrap();
+        (t, rx, out)
     }
 
     #[test]
-    fn missing_configured_model_never_receives_the_passage() {
-        let (mut t, _rx) = turn(Mode::Chat);
-        let mut out = Vec::new();
-        receive(
-            &mut t,
-            json!({"type":"ready","protocolVersion":1}),
-            &mut out,
-        )
-        .unwrap();
-        receive(
-            &mut t,
-            json!({"type":"response","command":"set_event_filter","id":"filter","success":true}),
-            &mut out,
-        )
-        .unwrap();
-        let err = receive(
-            &mut t,
-            json!({"type":"response","command":"get_state","id":"state","success":true,"data":{"model":null,"dumpTools":[],"messageCount":0}}),
-            &mut out,
-        );
-        assert!(err.is_err());
+    fn pi_selects_exact_model_before_sending_any_passage() {
+        let (mut t, _rx, mut out) = start_pi(Some("router/org/model"));
         assert_eq!(
             out,
-            vec![protocol::filter(), json!({"type":"get_state","id":"state"})]
+            [json!({"type":"set_model","id":"model","provider":"router","modelId":"org/model"})]
+        );
+        let rejected = json!({"type":"response","id":"model","command":"set_model","success":false,"error":"Model not found: router/org/model"});
+        assert!(
+            receive(&mut t, rejected, &mut out)
+                .unwrap_err()
+                .contains("Model not found")
+        );
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn pi_default_rejects_missing_model_or_existing_history() {
+        for state in [
+            json!({"model":null,"messageCount":0}),
+            json!({"model":{"id":"book","provider":"local"},"messageCount":1}),
+            json!({"model":{"id":"book","provider":"local"},"messageCount":0,"sessionFile":"saved.jsonl"}),
+        ] {
+            let (mut t, _rx, mut out) = start_pi(None);
+            assert!(receive(&mut t, json!({"type":"response","id":"state","command":"get_state","success":true,"data":state}), &mut out).is_err());
+            assert_eq!(out, [json!({"type":"get_state","id":"state"})]);
+        }
+    }
+
+    #[test]
+    fn pi_streams_text_once_and_waits_for_agent_settled() {
+        let (mut t, rx, mut out) = start_pi(Some("local/book"));
+        for frame in [
+            json!({"type":"response","id":"model","command":"set_model","success":true,"data":{"id":"book","provider":"local"}}),
+            json!({"type":"response","id":"state","command":"get_state","success":true,"data":{"model":{"id":"book","provider":"local"},"messageCount":0}}),
+            json!({"type":"response","id":"reader-1","command":"prompt","success":true,"data":{"disposition":"started"}}),
+            json!({"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"internal"}}),
+            json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Answer"}}),
+            json!({"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"Answer"}]}}),
+            json!({"type":"agent_end","willRetry":false}),
+        ] {
+            assert!(!receive(&mut t, frame, &mut out).unwrap());
+        }
+        assert!(
+            receive(
+                &mut t,
+                json!({"type":"agent_settled","aborted":false}),
+                &mut out
+            )
+            .unwrap()
+        );
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[2]["type"], "prompt");
+        let text: Vec<_> = rx
+            .try_iter()
+            .filter_map(|d| match d.update {
+                Update::Text(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, ["Answer"]);
+    }
+
+    #[test]
+    fn pi_errors_and_aborts_are_not_empty_successes() {
+        let (mut t, _rx, mut out) = start_pi(None);
+        t.phase = Phase::Running;
+        let error = json!({"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"Authentication failed"}});
+        assert_eq!(
+            receive(&mut t, error, &mut out).unwrap_err(),
+            "Authentication failed"
+        );
+        assert!(
+            receive(
+                &mut t,
+                json!({"type":"agent_settled","aborted":true}),
+                &mut out
+            )
+            .is_err()
+        );
+        assert!(
+            receive(
+                &mut t,
+                json!({"type":"agent_settled","aborted":false}),
+                &mut out
+            )
+            .is_err()
         );
     }
 

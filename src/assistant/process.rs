@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use super::{Event, Mode, launch};
 
-// Stay on the documented v1 transport, requesting compact streaming deltas.
+// Bound both directions, including malformed or unterminated JSONL.
 const MAX_FRAME: usize = 1 << 20;
 const EXIT_GRACE: Duration = Duration::from_millis(450);
 
@@ -18,6 +18,7 @@ pub(super) struct Process {
     input: Option<SyncSender<Vec<u8>>>,
     read_next: Option<Sender<()>>,
     reaped: bool,
+    backend: &'static str,
     pub(super) generation: u64,
     pub(super) launch: launch::Launch,
 }
@@ -30,6 +31,7 @@ impl Process {
         events: Sender<Event>,
     ) -> Result<Self, String> {
         let mut launch = launch::prepare(book, mode)?;
+        let backend = mode.backend();
         let command = launch
             .command
             .stdin(Stdio::piped())
@@ -42,7 +44,7 @@ impl Process {
         }
         let mut child = command
             .spawn()
-            .map_err(|e| format!("Could not start OMP: {e}. Is omp installed and on PATH?"))?;
+            .map_err(|e| format!("Could not start {backend}: {e}. Is it installed and on PATH?"))?;
         let stdout = child.stdout.take().expect("piped stdout");
         let mut stdin = child.stdin.take().expect("piped stdin");
         let (input, outgoing) = mpsc::sync_channel::<Vec<u8>>(8);
@@ -53,17 +55,18 @@ impl Process {
             input: Some(input),
             read_next: Some(read_next),
             reaped: false,
+            backend,
             generation,
             launch,
         };
         let frames = events.clone();
         thread::Builder::new()
-            .name("omp-stdout".into())
+            .name("assistant-stdout".into())
             .spawn(move || {
                 let mut reader = BufReader::new(stdout);
                 let mut bytes = Vec::new();
                 loop {
-                    let frame = read_frame(&mut reader, &mut bytes);
+                    let frame = read_frame(&mut reader, &mut bytes, backend);
                     let terminal = frame.is_err();
                     if frames.send(Event::Frame(generation, frame)).is_err() || terminal {
                         break;
@@ -78,13 +81,13 @@ impl Process {
             })
             .map_err(|e| e.to_string())?;
         thread::Builder::new()
-            .name("omp-stdin".into())
+            .name("assistant-stdin".into())
             .spawn(move || {
                 for bytes in outgoing {
                     if stdin.write_all(&bytes).is_err() {
                         let _ = events.send(Event::Frame(
                             generation,
-                            Err("OMP closed its input pipe".into()),
+                            Err(format!("{backend} closed its input pipe")),
                         ));
                         break;
                     }
@@ -104,13 +107,13 @@ impl Process {
         let mut bytes = serde_json::to_vec(frame).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
         if bytes.len() > MAX_FRAME {
-            return Err("Request exceeds OMP's 1 MiB frame limit".into());
+            return Err("Request exceeds Bookokrat's 1 MiB RPC frame limit".into());
         }
         self.input
             .as_ref()
-            .ok_or("OMP input is closed")?
+            .ok_or_else(|| format!("{} input is closed", self.backend))?
             .try_send(bytes)
-            .map_err(|_| "OMP is not accepting input".into())
+            .map_err(|_| format!("{} is not accepting input", self.backend))
     }
 
     // Closing stdin lets OMP flush session records; an unresponsive child
@@ -126,7 +129,7 @@ impl Process {
                     return if status.success() {
                         Ok(())
                     } else {
-                        Err(format!("OMP exited with {status}"))
+                        Err(format!("{} exited with {status}", self.backend))
                     };
                 }
                 Ok(None) if Instant::now() < until => thread::sleep(Duration::from_millis(10)),
@@ -140,7 +143,7 @@ impl Process {
         }
         let _ = self.child.kill();
         self.reaped = self.child.wait().is_ok();
-        Err("OMP did not shut down cleanly".into())
+        Err(format!("{} did not shut down cleanly", self.backend))
     }
 }
 
@@ -152,18 +155,24 @@ impl Drop for Process {
     }
 }
 
-fn read_frame(reader: &mut impl BufRead, bytes: &mut Vec<u8>) -> Result<Value, String> {
+fn read_frame(
+    reader: &mut impl BufRead,
+    bytes: &mut Vec<u8>,
+    backend: &str,
+) -> Result<Value, String> {
     bytes.clear();
     // take() bounds memory even if a broken executable never writes a newline.
     let count = reader
         .take(MAX_FRAME as u64)
         .read_until(b'\n', bytes)
-        .map_err(|e| format!("Could not read from OMP: {e}"))?;
+        .map_err(|e| format!("Could not read from {backend}: {e}"))?;
     if count == 0 {
-        return Err("OMP exited before completing the request. Check your OMP installation, model and login.".into());
+        return Err(format!(
+            "{backend} exited before completing the request. Check your {backend} installation, model and login."
+        ));
     }
     if bytes.last() != Some(&b'\n') {
-        return Err("Incomplete or oversized OMP frame".into());
+        return Err(format!("Incomplete or oversized {backend} frame"));
     }
-    serde_json::from_slice(bytes).map_err(|_| "OMP returned invalid JSON".into())
+    serde_json::from_slice(bytes).map_err(|_| format!("{backend} returned invalid JSON"))
 }

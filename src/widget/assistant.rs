@@ -311,9 +311,9 @@ impl Assistant {
                     return None;
                 }
                 self.entry(if mode == Mode::Agent {
-                    "You · Agent\n"
+                    "You · OMP agent\n"
                 } else {
-                    "You · Chat\n"
+                    "You · Pi chat\n"
                 });
                 self.history.text.push_str(prompt);
                 let quote = self.quote.as_ref().map(|q| q.text.clone());
@@ -355,7 +355,11 @@ impl Assistant {
                 if status == "Approval withdrawn" {
                     self.approval = None;
                 }
-                self.entry("OMP · ");
+                self.entry(if self.active == Some(Mode::Agent) {
+                    "OMP · "
+                } else {
+                    "Pi · "
+                });
                 append_visible(&mut self.history.text, &status, false);
             }
             Update::Approval { description } if self.busy() && !self.canceling => {
@@ -478,7 +482,7 @@ impl Assistant {
         if rows == 0 && body_height > 0 {
             frame.render_widget(
                 Paragraph::new(
-                    "Plain questions start fresh.\n/agent continues this book’s session.",
+                    "Pi answers plain questions.\n/agent continues this book’s OMP session.",
                 )
                 .wrap(Wrap { trim: true })
                 .style(normal),

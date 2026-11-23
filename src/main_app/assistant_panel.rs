@@ -184,6 +184,10 @@ impl App {
                     && let Err(error) = self.assistant.runtime.submit(Request {
                         book,
                         mode,
+                        pi_model: match mode {
+                            crate::assistant::Mode::Chat => self.settings.load().pi_model.clone(),
+                            crate::assistant::Mode::Agent => None,
+                        },
                         prompt,
                         quote,
                     })

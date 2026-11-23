@@ -192,6 +192,10 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nav_panel_width: Option<u16>,
 
+    /// Qualified provider/model for reader questions; None leaves the choice to Pi.
+    #[serde(default)]
+    pub pi_model: Option<String>,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lookup_command: Option<String>,
 
@@ -245,6 +249,7 @@ impl Default for Settings {
             lookup_command: None,
             lookup_display: LookupDisplay::default(),
             nav_panel_width: None,
+            pi_model: None,
             synctex_editor: None,
         }
     }
@@ -589,32 +594,34 @@ fn save_settings_to_file(settings: &Settings, path: &PathBuf) {
     }
 }
 
-/// Update only app-managed keys in an existing config file, preserving
-/// all comments, blank lines, and user-managed sections (lookup_command,
-/// lookup_display, custom_themes).
+/// Update top-level app-managed keys without rewriting unrelated YAML sections.
 fn update_settings_values(existing_content: &str, settings: &Settings) -> String {
+    use serde_yaml::{Mapping, Value};
     use std::collections::HashSet;
 
     let key_values = app_managed_key_values(settings);
-    let key_set: HashSet<&str> = key_values.iter().map(|(k, _)| k.as_str()).collect();
+    let existing = serde_yaml::from_str::<Mapping>(existing_content).unwrap_or_default();
     let mut found_keys = HashSet::new();
 
     let mut lines: Vec<String> = existing_content.lines().map(|l| l.to_string()).collect();
 
-    for line in lines.iter_mut() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('#') || trimmed.is_empty() {
+    for line in &mut lines {
+        // A nested key (or line inside a block scalar) is not an app setting.
+        if line.starts_with(char::is_whitespace) || line.starts_with('#') {
             continue;
         }
-        let key_owned = match trimmed.find(':') {
-            Some(pos) => trimmed[..pos].trim().to_string(),
-            None => continue,
+        let Some((key, current_value)) = line.split_once(':') else {
+            continue;
         };
-        if key_set.contains(key_owned.as_str())
-            && let Some((_, value)) = key_values.iter().find(|(k, _)| k == &key_owned)
-        {
-            *line = format!("{}: {}", key_owned, value);
-            found_keys.insert(key_owned);
+        if let Some((key, value)) = key_values.iter().find(|(name, _)| name == key.trim_end()) {
+            found_keys.insert(key.as_str());
+            // Don't discard inline comments, quoting, or block scalar formatting
+            // on an unchanged setting when the user edits another one.
+            if current_value.trim_start() != value
+                && existing.get(key.as_str()) != serde_yaml::from_str::<Value>(value).ok().as_ref()
+            {
+                *line = format!("{key}: {value}");
+            }
         }
     }
 
@@ -716,6 +723,10 @@ fn app_managed_key_values(settings: &Settings) -> Vec<(String, String)> {
                 .unwrap_or_else(|| "null".into()),
         ),
         (
+            "pi_model".into(),
+            nullable_string_yaml(settings.pi_model.as_deref()),
+        ),
+        (
             "lookup_command".into(),
             settings
                 .lookup_command
@@ -739,6 +750,11 @@ fn app_managed_key_values(settings: &Settings) -> Vec<(String, String)> {
                 .unwrap_or_else(|| "null".into()),
         ),
     ]
+}
+
+fn nullable_string_yaml(value: Option<&str>) -> String {
+    // JSON strings are valid YAML scalars; keep quotes and newlines on one config line.
+    serde_json::to_string(&value).expect("string serialization cannot fail")
 }
 
 fn generate_settings_yaml(settings: &Settings) -> String {
@@ -801,8 +817,13 @@ fn generate_settings_yaml(settings: &Settings) -> String {
         content.push_str(&format!("nav_panel_width: {}\n", w));
     }
     content.push('\n');
+    content.push_str("# Reader questions: use null for Pi's default, or a provider/model ID.\n");
+    content.push_str(&format!(
+        "pi_model: {}\n\n",
+        nullable_string_yaml(settings.pi_model.as_deref())
+    ));
 
-    if let Some(ref cmd) = settings.lookup_command {
+    if let Some(cmd) = &settings.lookup_command {
         content.push_str(&format!("lookup_command: \"{}\"\n", cmd));
         let display_str = match settings.lookup_display {
             LookupDisplay::Popup => "popup",
@@ -927,6 +948,32 @@ pub fn get_custom_themes() -> Vec<YamlTheme> {
 mod tests {
     use super::*;
     use std::sync::{Mutex, OnceLock};
+
+    #[test]
+    fn pi_model_roundtrips_without_rewriting_nested_keys() {
+        let existing = "# custom section\nextra:\n  pi_model: untouched\n  theme: nested\n\
+            theme: 'My theme' # keep comment\nlookup_command: >-\n  lookup {}\n";
+        let mut settings: Settings = serde_yaml::from_str(existing).unwrap();
+        assert!(settings.pi_model.is_none());
+        settings.pi_model = Some("provider/model: #1".into());
+        let updated = update_settings_values(existing, &settings);
+        assert!(updated.starts_with(existing));
+        let generated = generate_settings_yaml(&settings);
+        for yaml in [updated.as_str(), generated.as_str()] {
+            let reloaded: Settings = serde_yaml::from_str(yaml).unwrap();
+            assert_eq!(reloaded.pi_model, settings.pi_model);
+        }
+        settings.pi_model = None;
+        let cleared = update_settings_values(&updated, &settings);
+        assert!(cleared.starts_with(existing));
+        assert!(cleared.contains("\npi_model: null\n"));
+        assert!(
+            serde_yaml::from_str::<Settings>(&cleared)
+                .unwrap()
+                .pi_model
+                .is_none()
+        );
+    }
 
     #[test]
     fn inline_annotations_default_on_and_persist() {
@@ -1067,7 +1114,10 @@ custom_themes:
 
         let updated = update_settings_values(existing, &settings);
 
-        assert!(updated.contains("lookup_command: 'open dict://{}'"));
+        assert_eq!(
+            serde_yaml::from_str::<serde_yaml::Value>(&updated).unwrap()["lookup_command"].as_str(),
+            settings.lookup_command.as_deref()
+        );
         assert!(updated.contains("lookup_display: fire_and_forget"));
         assert!(updated.contains("custom_themes:\n  - scheme: \"Manual Theme\""));
         assert!(updated.contains("theme: \"Oceanic Next\""));
@@ -1111,7 +1161,7 @@ my_custom_flag: true
 
         let updated = update_settings_values(existing, &settings);
 
-        assert!(updated.contains("lookup_command: 'dict {}'"));
+        assert!(updated.starts_with(existing));
         assert!(updated.contains("version: 3"));
         assert!(updated.contains("theme: \"Oceanic Next\""));
         assert!(updated.contains("book_sort_order: by_name"));

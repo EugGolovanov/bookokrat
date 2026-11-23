@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/0ebe61c6-4629-4bde-8bd4-50feb9a424a3
 
 - EPUB, PDF, and DJVU support in one TUI app
 - Split layout: library/TOC on the left, reader on the right
-- Reading assistant: press `Space` then `y` to ask about a selection using your system `omp` model and login. `Esc` returns to the book, including in Zen mode. Plain questions start fresh; `/agent` resumes the book’s session. See [setup and privacy](readme.txt).
+- Reading assistant: `Space` then `y` opens a tab or Zen overlay. Plain questions use [Pi](https://pi.dev); choose a model under **Settings → Integrations → Pi reader model**. `/agent` uses OMP and resumes the book’s session. See [setup and privacy](readme.txt).
 - Fast PDF/DJVU pipeline with Kitty SHM image transfer in supported terminals
 - Search, bookmarks, jump list history, reading stats
 - Inline comments/annotations with persistent storage and Markdown export; note bodies can be hidden and peeked on demand

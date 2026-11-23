@@ -1,3 +1,6 @@
+mod pi_model_picker;
+
+use self::pi_model_picker::{PI_DEFAULT, PiModelPicker};
 use crate::inputs::KeySeq;
 use crate::main_app::VimNavMotions;
 use crate::settings::{
@@ -73,6 +76,7 @@ impl SettingsTab {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IntegrationsFocus {
+    PiModel,
     LookupCommand,
     DisplayPopup,
     DisplayFireAndForget,
@@ -84,17 +88,19 @@ enum IntegrationsFocus {
 impl IntegrationsFocus {
     fn next(self) -> Self {
         match self {
+            Self::PiModel => Self::LookupCommand,
             Self::LookupCommand => Self::DisplayPopup,
             Self::DisplayPopup => Self::DisplayFireAndForget,
             Self::DisplayFireAndForget => Self::TestLookup,
             Self::TestLookup => Self::SynctexEditor,
             Self::SynctexEditor => Self::TestSynctex,
-            Self::TestSynctex => Self::LookupCommand,
+            Self::TestSynctex => Self::PiModel,
         }
     }
     fn prev(self) -> Self {
         match self {
-            Self::LookupCommand => Self::TestSynctex,
+            Self::PiModel => Self::TestSynctex,
+            Self::LookupCommand => Self::PiModel,
             Self::DisplayPopup => Self::LookupCommand,
             Self::DisplayFireAndForget => Self::DisplayPopup,
             Self::TestLookup => Self::DisplayFireAndForget,
@@ -102,6 +108,19 @@ impl IntegrationsFocus {
             Self::TestSynctex => Self::SynctexEditor,
         }
     }
+    // Click and scroll targets in the Integrations layout.
+    fn chunk(self) -> usize {
+        match self {
+            Self::PiModel => 1,
+            Self::LookupCommand => 4,
+            Self::DisplayPopup => 7,
+            Self::DisplayFireAndForget => 8,
+            Self::TestLookup => 10,
+            Self::SynctexEditor => 13,
+            Self::TestSynctex => 16,
+        }
+    }
+
     fn is_text_input(self) -> bool {
         matches!(self, Self::LookupCommand | Self::SynctexEditor)
     }
@@ -217,6 +236,7 @@ pub struct SettingsPopup {
     theme_names: Vec<String>,
     // Integrations tab state
     integrations_focus: IntegrationsFocus,
+    pi_picker: Option<PiModelPicker>,
     lookup_command_input: crate::vendored::tui_textarea::TextArea<'static>,
     lookup_display_selected: LookupDisplay,
     synctex_editor_input: crate::vendored::tui_textarea::TextArea<'static>,
@@ -292,7 +312,8 @@ impl SettingsPopup {
                 snapshot.transparent_background,
             ),
             theme_names,
-            integrations_focus: IntegrationsFocus::LookupCommand,
+            integrations_focus: IntegrationsFocus::PiModel,
+            pi_picker: None,
             lookup_command_input,
             lookup_display_selected: snapshot.lookup_display,
             synctex_editor_input,
@@ -357,14 +378,14 @@ impl SettingsPopup {
         let palette = current_theme();
 
         // Build footer hints string for bottom border
-        let hints = if self.current_tab == SettingsTab::Integrations {
+        let hints = if self.pi_picker.is_some() {
+            " ↑/↓ navigate  Enter choose  Esc back "
+        } else if self.current_tab == SettingsTab::Integrations {
             " Tab switch tabs  ↑/↓ navigate  Enter select  Esc close "
         } else if self.current_tab == SettingsTab::General {
             " Tab switch tabs  h/l columns  j/k navigate  Enter select  Esc close "
-        } else if cfg!(feature = "pdf") {
-            " Tab switch tabs  j/k navigate  Enter select  Esc close "
         } else {
-            " j/k navigate  Enter select  Esc close "
+            " Tab switch tabs  j/k navigate  Enter select  Esc close "
         };
 
         // Main block with title and footer hints on bottom border
@@ -409,6 +430,15 @@ impl SettingsPopup {
         self.content_viewport = Some(viewport);
 
         if viewport.width == 0 || viewport.height == 0 {
+            return;
+        }
+        if let Some(picker) = &mut self.pi_picker {
+            picker.render(
+                f.buffer_mut(),
+                viewport,
+                self.settings.load().pi_model.as_deref(),
+                palette,
+            );
             return;
         }
 
@@ -533,10 +563,7 @@ impl SettingsPopup {
                 };
                 self.theme_names.len() as u16 + 1 + 1 + 1 + 2 + truecolor_note_height
             }
-            SettingsTab::Integrations => {
-                // 1+3+3+1+1+1+1+1+1+1+3+9+1+1 = 28
-                28
-            }
+            SettingsTab::Integrations => 31,
         }
     }
 
@@ -560,15 +587,7 @@ impl SettingsPopup {
                 }
             }
             SettingsTab::Integrations => {
-                let chunk_idx = match self.integrations_focus {
-                    IntegrationsFocus::LookupCommand => 1,
-                    IntegrationsFocus::DisplayPopup => 4,
-                    IntegrationsFocus::DisplayFireAndForget => 5,
-                    IntegrationsFocus::TestLookup => 7,
-                    IntegrationsFocus::SynctexEditor => 10,
-                    IntegrationsFocus::TestSynctex => 13,
-                };
-                let r = self.content_chunks.get(chunk_idx)?;
+                let r = self.content_chunks.get(self.integrations_focus.chunk())?;
                 Some((r.y, r.height))
             }
         }
@@ -1544,6 +1563,9 @@ impl SettingsPopup {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(1), // Pi header
+                Constraint::Length(1), // Pi model picker button
+                Constraint::Length(1), // spacing
                 Constraint::Length(1), // 0:  Lookup header
                 Constraint::Length(3), // 1:  Lookup command input
                 Constraint::Length(3), // 2:  Lookup hints (with blank line after first)
@@ -1563,6 +1585,20 @@ impl SettingsPopup {
             .split(area);
 
         self.content_chunks = chunks.to_vec();
+        let (pi, chunks) = chunks.split_at(3);
+        self.render_section_header(buf, pi[0], "Pi reader model", palette, palette.base_06);
+        self.render_test_button(
+            buf,
+            pi[1],
+            "Choose",
+            self.settings
+                .load()
+                .pi_model
+                .as_deref()
+                .unwrap_or(PI_DEFAULT),
+            self.integrations_focus == IntegrationsFocus::PiModel,
+            palette,
+        );
 
         // -- Dictionary Lookup section --
         self.render_section_header(
@@ -1747,6 +1783,10 @@ impl SettingsPopup {
 
     fn apply_integrations_selected(&mut self) -> Option<SettingsAction> {
         match self.integrations_focus {
+            IntegrationsFocus::PiModel => {
+                self.pi_picker = Some(PiModelPicker::open());
+                None
+            }
             IntegrationsFocus::DisplayPopup => {
                 self.lookup_display_selected = LookupDisplay::Popup;
                 self.settings
@@ -1771,13 +1811,26 @@ impl SettingsPopup {
         }
     }
 
+    pub(crate) fn poll_pi_models(&mut self) -> bool {
+        self.pi_picker
+            .as_mut()
+            .is_some_and(|picker| picker.poll(&self.settings))
+    }
+
+    pub(crate) fn scroll_pi_models(&mut self, amount: i32) {
+        if let Some(picker) = &mut self.pi_picker {
+            picker.scroll(amount as isize);
+        }
+    }
+
     pub fn handle_mouse_click(&mut self, col: u16, row: u16) -> Option<SettingsAction> {
         // Tab bar clicks
         if let Some(tab_area) = self.tab_area
             && row >= tab_area.y
             && row < tab_area.y + tab_area.height
         {
-            let rel_x = col.saturating_sub(tab_area.x);
+            // Account for the hidden General tab in builds without PDF support.
+            let rel_x = col.saturating_sub(tab_area.x) + if cfg!(feature = "pdf") { 0 } else { 10 };
             // Tab positions: " General   Select Theme   Integrations"
             //                  1..8       11..23          26..38
             let new_tab = if cfg!(feature = "pdf") && (1..11).contains(&rel_x) {
@@ -1796,6 +1849,13 @@ impl SettingsPopup {
                 self.set_tab(tab);
                 return None;
             }
+        }
+
+        if let Some(picker) = &mut self.pi_picker {
+            if picker.click(col, row, &self.settings) {
+                self.pi_picker = None;
+            }
+            return None;
         }
 
         if self.content_chunks.is_empty() {
@@ -1869,27 +1929,19 @@ impl SettingsPopup {
                 }
             }
             SettingsTab::Integrations => {
-                // 0: header, 1: input, 2: hints
-                // 3: display header, 4: popup radio, 5: faf radio
-                // 6: spacing, 7: test lookup, 8: spacing
-                // 9: synctex header, 10: input, 11: hints
-                // 12: spacing, 13: test synctex
-                if hit(1) {
-                    self.integrations_focus = IntegrationsFocus::LookupCommand;
-                } else if hit(4) {
-                    self.integrations_focus = IntegrationsFocus::DisplayPopup;
-                    return self.apply_integrations_selected();
-                } else if hit(5) {
-                    self.integrations_focus = IntegrationsFocus::DisplayFireAndForget;
-                    return self.apply_integrations_selected();
-                } else if hit(7) {
-                    self.integrations_focus = IntegrationsFocus::TestLookup;
-                    return self.apply_integrations_selected();
-                } else if hit(10) {
-                    self.integrations_focus = IntegrationsFocus::SynctexEditor;
-                } else if hit(13) {
-                    self.integrations_focus = IntegrationsFocus::TestSynctex;
-                    return self.apply_integrations_selected();
+                for focus in [
+                    IntegrationsFocus::PiModel,
+                    IntegrationsFocus::LookupCommand,
+                    IntegrationsFocus::DisplayPopup,
+                    IntegrationsFocus::DisplayFireAndForget,
+                    IntegrationsFocus::TestLookup,
+                    IntegrationsFocus::SynctexEditor,
+                    IntegrationsFocus::TestSynctex,
+                ] {
+                    if hit(focus.chunk()) {
+                        self.integrations_focus = focus;
+                        return self.apply_integrations_selected();
+                    }
                 }
             }
         }
@@ -1898,6 +1950,7 @@ impl SettingsPopup {
 
     /// Switch tabs and reset scroll state.
     fn set_tab(&mut self, tab: SettingsTab) {
+        self.pi_picker = None;
         if self.current_tab != tab {
             self.current_tab = tab;
             self.scroll_offset = 0;
@@ -1905,33 +1958,29 @@ impl SettingsPopup {
     }
 
     fn save_integrations(&self) {
-        let lookup_text: String = self
-            .lookup_command_input
-            .lines()
-            .first()
-            .cloned()
-            .unwrap_or_default();
-        let lookup_cmd = if lookup_text.trim().is_empty() {
-            None
-        } else {
-            Some(lookup_text)
+        let snapshot = self.settings.load();
+        let command_matches = |lines: &[String], command: &Option<String>| {
+            lines
+                .iter()
+                .map(String::as_str)
+                .eq(command.as_deref().unwrap_or("").split('\n'))
         };
-
-        let synctex_text: String = self
-            .synctex_editor_input
-            .lines()
-            .first()
-            .cloned()
-            .unwrap_or_default();
-        let synctex_cmd = if synctex_text.trim().is_empty() {
-            None
-        } else {
-            Some(synctex_text)
+        let lookup = self.lookup_command_input.lines();
+        let synctex = self.synctex_editor_input.lines();
+        if command_matches(lookup, &snapshot.lookup_command)
+            && command_matches(synctex, &snapshot.synctex_editor)
+            && snapshot.lookup_display == self.lookup_display_selected
+        {
+            return;
+        }
+        let command = |lines: &[String]| {
+            let value = lines.join("\n");
+            (!value.trim().is_empty()).then_some(value)
         };
         self.settings.update(|settings| {
-            settings.lookup_command = lookup_cmd;
+            settings.lookup_command = command(lookup);
             settings.lookup_display = self.lookup_display_selected;
-            settings.synctex_editor = synctex_cmd;
+            settings.synctex_editor = command(synctex);
         });
     }
 
@@ -2003,6 +2052,14 @@ impl SettingsPopup {
             match km.lookup(KeyContext::PopupSettings, &prospective) {
                 LookupResult::Found(action) => {
                     key_seq.clear();
+                    if !matches!(action, Action::NextTab | Action::PrevTab)
+                        && let Some(picker) = &mut self.pi_picker
+                    {
+                        if picker.handle_action(action, &self.settings) {
+                            self.pi_picker = None;
+                        }
+                        return None;
+                    }
                     match action {
                         Action::NextTab => {
                             if self.current_tab == SettingsTab::Integrations {
@@ -2186,7 +2243,7 @@ impl VimNavMotions for SettingsPopup {
                 self.theme_selected_idx = 0;
             }
             SettingsTab::Integrations => {
-                self.integrations_focus = IntegrationsFocus::LookupCommand;
+                self.integrations_focus = IntegrationsFocus::PiModel;
             }
         }
     }

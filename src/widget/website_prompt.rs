@@ -1,8 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Constraint, Rect},
+    layout::{Constraint, Position, Rect},
     style::{Modifier, Style},
+    text::Span,
     widgets::{Block, Clear, Paragraph, Wrap},
 };
 
@@ -16,18 +17,48 @@ use crate::{
     vendored::tui_textarea::TextArea,
 };
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WebsiteIntent {
     Open,
     Save,
     Close,
 }
 
+struct Button {
+    compact: &'static str,
+    label: String,
+    width: u16,
+    intent: WebsiteIntent,
+    area: Rect,
+}
+
+impl Button {
+    fn new(compact: &'static str, binding: &str, intent: WebsiteIntent) -> Self {
+        let label = format!("{compact} ({binding})");
+        let width = Span::raw(label.as_str()).width();
+        Self {
+            compact,
+            label,
+            width: u16::try_from(width).unwrap_or(u16::MAX),
+            intent,
+            area: Rect::default(),
+        }
+    }
+
+    fn display(&self, available: u16) -> (&str, u16) {
+        if self.width <= available {
+            (&self.label, self.width)
+        } else {
+            (self.compact, available.min(self.compact.len() as u16))
+        }
+    }
+}
+
 pub(crate) struct WebsitePrompt {
     editor: TextArea<'static>,
     pub(crate) error: Option<String>,
-    hints: String,
-    busy_hint: String,
+    buttons: [Button; 3],
+    hide: Button,
 }
 
 impl Default for WebsitePrompt {
@@ -43,12 +74,16 @@ impl Default for WebsitePrompt {
         Self {
             editor,
             error: None,
-            hints: format!(
-                "{} save & open   {} save only   {close} close",
-                label(Action::Select),
-                label(Action::SaveWebsite)
-            ),
-            busy_hint: format!("Saving website…   {close} hide and keep saving"),
+            buttons: [
+                Button::new("[Save & open]", &label(Action::Select), WebsiteIntent::Open),
+                Button::new(
+                    "[Save only]",
+                    &label(Action::SaveWebsite),
+                    WebsiteIntent::Save,
+                ),
+                Button::new("[Close]", &close, WebsiteIntent::Close),
+            ],
+            hide: Button::new("[Hide]", &close, WebsiteIntent::Close),
         }
     }
 }
@@ -139,23 +174,56 @@ impl WebsitePrompt {
         None
     }
 
+    pub(crate) fn click(&self, col: u16, row: u16, busy: bool) -> Option<WebsiteIntent> {
+        let buttons = if busy {
+            std::slice::from_ref(&self.hide)
+        } else {
+            self.buttons.as_slice()
+        };
+        buttons
+            .iter()
+            .find(|button| button.area.contains(Position::new(col, row)))
+            .map(|button| button.intent)
+    }
+
+    pub(crate) fn started_saving(&mut self) {
+        self.error = None;
+        for button in &mut self.buttons {
+            button.area = Rect::default();
+        }
+        self.hide.area = Rect::default();
+    }
+
     pub(crate) fn render(&mut self, frame: &mut Frame, busy: bool) {
         let screen = frame.area();
         let theme = current_theme();
         let normal = Style::default().fg(theme.base_05).bg(theme.base_00);
-        let hint = if busy { &self.busy_hint } else { &self.hints };
         let width = screen.width.min(72);
         let borders = screen.height >= 4 && width >= 4;
         let border_space = if borders { 2 } else { 0 };
-        let hint_rows = if hint.len() > usize::from(width - border_space) {
-            3
+        let inner_width = width - border_space;
+        let buttons = if busy {
+            std::slice::from_mut(&mut self.hide)
         } else {
-            1
+            self.buttons.as_mut_slice()
         };
+        let mut offsets = [Rect::default(); 3];
+        let (mut x, mut y) = (0, 0);
+        for (button, offset) in buttons.iter_mut().zip(&mut offsets) {
+            button.area = Rect::default();
+            let (_, width) = button.display(inner_width);
+            if x != 0 && x + width > inner_width {
+                x = 0;
+                y += 1;
+            }
+            *offset = Rect::new(x, y, width, 1);
+            x += width + 1;
+        }
+        let button_rows = y + 1;
         let error_rows = if self.error.is_some() { 3 } else { 0 };
         let area = screen.centered(
             Constraint::Length(width),
-            Constraint::Length(1 + border_space + error_rows + hint_rows),
+            Constraint::Length(1 + u16::from(busy) + border_space + error_rows + button_rows),
         );
         frame.render_widget(Clear, area);
         let block = if borders {
@@ -172,7 +240,7 @@ impl WebsitePrompt {
         }
 
         let mut body = inner;
-        if !busy || inner.height > 1 {
+        if !busy || inner.height >= 3 {
             self.editor.set_style(normal);
             self.editor.set_placeholder_style(normal.fg(theme.base_04));
             self.editor.set_cursor_line_style(normal);
@@ -185,8 +253,18 @@ impl WebsitePrompt {
             body.y += 1;
             body.height -= 1;
         }
+        if busy {
+            frame.render_widget(
+                Span::styled("Saving website…", normal.fg(theme.base_0c)),
+                Rect { height: 1, ..body },
+            );
+            body.y += 1;
+            body.height -= 1;
+        }
         if let Some(error) = &self.error {
-            let height = error_rows.min(body.height);
+            let height = error_rows
+                .min(body.height.saturating_sub(button_rows).max(1))
+                .min(body.height);
             frame.render_widget(
                 Paragraph::new(error.as_str())
                     .style(normal.fg(theme.base_08))
@@ -196,12 +274,14 @@ impl WebsitePrompt {
             body.y += height;
             body.height -= height;
         }
-        frame.render_widget(
-            Paragraph::new(hint.as_str())
-                .style(normal.fg(theme.base_0c))
-                .wrap(Wrap { trim: true }),
-            body,
-        );
+        let style = normal.fg(theme.base_00).bg(theme.base_0c);
+        for (button, offset) in buttons.iter_mut().zip(offsets) {
+            if offset.y < body.height {
+                button.area = Rect::new(body.x + offset.x, body.y + offset.y, offset.width, 1);
+                let (label, _) = button.display(inner_width);
+                frame.render_widget(Span::styled(label, style), button.area);
+            }
+        }
     }
 }
 

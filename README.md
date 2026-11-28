@@ -110,7 +110,13 @@ bookokrat path/to/book.epub --no-images   # text only; PDF and DJVU can't be ope
 
 ### Read or save a web article
 
-In the reader or library, press `Space` then `u` and paste an HTTP(S) URL. Press `Enter` to save the EPUB in the active library and open it, or `Ctrl+s` to save without switching books. `Esc` closes the prompt. If the download has started, it continues without opening the article.
+If the welcome Help screen is open, press `Esc` to reach the library. Click **Website** in the bottom bar, or press `Space` and then `u` (also works in Zen mode). Paste an HTTP(S) article URL.
+
+- **Save & open** (`Enter`) adds the EPUB to the active library and opens it.
+- **Save only** (`Ctrl+s`) adds it without changing what you're reading.
+- **Close** (`Esc`) dismisses the prompt. During a download, **Hide** (`Esc`) keeps it saving without opening it.
+
+Choose a destination library with `bookokrat -d /path/to/library`. If your installed copy has no **Website** button outside Zen mode, run `cargo run --locked` from this checkout to launch the updated reader.
 
 From the command line:
 

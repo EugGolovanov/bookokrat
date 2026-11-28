@@ -118,9 +118,8 @@ use epub::doc::EpubDoc;
 use log::{debug, error, info};
 use ratatui::{
     Terminal,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
 
@@ -252,6 +251,7 @@ pub struct App {
     pub navigation_panel: NavigationPanel,
     assistant: ReaderAssistant,
     website_prompt: Option<crate::widget::website_prompt::WebsitePrompt>,
+    website_left_down: bool,
     website_job: Option<std::sync::mpsc::Receiver<(Result<PathBuf>, bool)>>,
     text_reader: MarkdownTextReader,
     home_context: LibraryContext,
@@ -285,6 +285,7 @@ pub struct App {
     highlight_palette_target: Option<(String, crate::annotations::HighlightColor)>,
     notifications: NotificationManager,
     help_bar_area: Rect,
+    help_bar_targets: Vec<(Rect, crate::keybindings::action::Action)>,
     zen_mode: bool,
     test_mode: bool,
     nav_panel_width_override: Option<u16>,
@@ -760,6 +761,7 @@ impl App {
             navigation_panel,
             assistant: ReaderAssistant::default(),
             website_prompt: None,
+            website_left_down: false,
             website_job: None,
             text_reader,
             home_context,
@@ -790,6 +792,7 @@ impl App {
             highlight_palette_target: None,
             notifications: NotificationManager::new(),
             help_bar_area: Rect::default(),
+            help_bar_targets: Vec::new(),
             zen_mode: false,
             test_mode: false,
             nav_panel_width_override: initial_settings.nav_panel_width,
@@ -2712,6 +2715,14 @@ impl App {
 
     #[cfg(feature = "pdf")]
     fn should_route_pdf_mouse_to_ui(&self, mouse_event: &MouseEvent) -> bool {
+        if self.website_left_down
+            && matches!(
+                mouse_event.kind,
+                MouseEventKind::Up(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
+            )
+        {
+            return true;
+        }
         crate::widget::pdf_reader::should_route_mouse_to_ui(
             mouse_event,
             self.has_active_popup(),
@@ -2723,7 +2734,23 @@ impl App {
 
     /// Handle non-scroll mouse events (clicks, drags, etc.)
     fn handle_non_scroll_mouse_event(&mut self, mouse_event: MouseEvent) {
+        // A button can close on press. Its release must not follow a reader link underneath.
+        match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.website_left_down = self.website_prompt.is_some()
+            }
+            MouseEventKind::Up(MouseButton::Left)
+                if std::mem::take(&mut self.website_left_down) =>
+            {
+                return;
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.website_left_down => return,
+            _ => {}
+        }
         if self.website_prompt.is_some() {
+            if mouse_event.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.website_click(mouse_event.column, mouse_event.row);
+            }
             return;
         }
         if self.handle_assistant_mouse(mouse_event) {
@@ -4592,76 +4619,88 @@ impl App {
         }
     }
 
-    /// Build the clickable help bar button labels from the keymap.
-    /// Returns: Vec<(label, Action)> e.g. [("Space+a: Comments", ToggleCommentsViewer), ...]
-    fn help_bar_buttons() -> Vec<(String, crate::keybindings::action::Action)> {
-        use crate::keybindings::action::Action;
-        use crate::keybindings::context::KeyContext;
+    fn render_help_bar_buttons(&mut self, f: &mut ratatui::Frame, mut area: Rect) -> Rect {
+        use crate::keybindings::{action::Action, context::KeyContext};
+        use unicode_width::UnicodeWidthStr;
+
+        self.help_bar_targets.clear();
+        if area.is_empty() || self.assistant_focused() || self.website_prompt.is_some() {
+            return area;
+        }
+
+        let popup = self.has_active_popup();
+        let buttons = [
+            ("Help", Action::ToggleHelp),
+            ("Website", Action::OpenWebsite),
+            ("Theme", Action::OpenThemeSelector),
+            ("Stats", Action::ToggleBookStats),
+            ("History", Action::ToggleReadingHistory),
+            ("Comments", Action::ToggleCommentsViewer),
+        ];
+        let buttons = buttons
+            .iter()
+            .filter(|(_, action)| !popup || *action != Action::OpenWebsite);
+
+        // Keep status text readable without displacing Website and Help on narrow screens.
+        let width = usize::from(area.width);
+        let status_width = if self.notifications.has_notification() {
+            64
+        } else {
+            width / 3
+        };
+        let mut spare = width - status_width.min(width.saturating_sub("[Website] [Help]".len()));
+        let mut count = 0;
+        for (name, _) in buttons.clone() {
+            let cells = name.width() + 2 + usize::from(count != 0);
+            if cells > spare {
+                break;
+            }
+            spare -= cells;
+            count += 1;
+        }
 
         let km = crate::keybindings::keymap();
-        let btn = |action: Action, label: &str| -> (String, Action) {
-            let key = km
-                .describe_binding_display(KeyContext::Global, &action)
-                .unwrap_or_else(|| "?".to_string());
-            (format!("{key}: {label}"), action)
-        };
+        let style = Style::default().fg(current_theme().base_03);
+        let label_style = style.add_modifier(Modifier::UNDERLINED);
+        let buf = f.buffer_mut();
+        for (name, action) in buttons.take(count) {
+            let right = area.right();
+            let y = area.y;
+            let name_x = right - 1 - name.width() as u16;
+            buf.set_string(name_x, y, name, label_style);
+            buf.set_string(right - 1, y, "]", style);
 
-        vec![
-            btn(Action::ToggleCommentsViewer, "Comments"),
-            btn(Action::ToggleReadingHistory, "History"),
-            btn(Action::ToggleBookStats, "Stats"),
-            btn(Action::OpenThemeSelector, "Theme"),
-            btn(Action::ToggleHelp, "Help"),
-        ]
+            let mut x = name_x - 1;
+            if spare >= 3
+                && let Some(key) = km.describe_binding_display(KeyContext::Global, action)
+            {
+                let extra = key.width() + 2;
+                if extra <= spare {
+                    spare -= extra;
+                    x -= extra as u16;
+                    buf.set_string(x + 1, y, key, label_style);
+                    buf.set_string(name_x - 2, y, ": ", label_style);
+                }
+            }
+            buf.set_string(x, y, "[", style);
+            self.help_bar_targets
+                .push((Rect::new(x, y, right - x, 1), action.clone()));
+            area.width = (x - area.x).saturating_sub(1);
+        }
+        area
     }
 
     fn handle_help_bar_click(&mut self, click_x: u16, click_y: u16) -> bool {
-        let area = self.help_bar_area;
-        if click_y < area.y || click_y >= area.y + area.height {
+        if self.zen_mode {
             return false;
         }
-        if click_x < area.x || click_x >= area.x + area.width {
-            return false;
-        }
+        let pos = Position::new(click_x, click_y);
         if self.assistant_focused() {
-            return true; // In the composer the footer shows shortcuts, not buttons.
+            return self.help_bar_area.contains(pos);
         }
-
-        let inner_x = click_x.saturating_sub(area.x + 1);
-        let inner_y = click_y.saturating_sub(area.y + 1);
-
-        if inner_y != 0 {
-            return false;
+        if let Some((_, action)) = self.help_bar_targets.iter().find(|(r, _)| r.contains(pos)) {
+            return self.dispatch_global_action(action.clone());
         }
-
-        let width = area.width.saturating_sub(2);
-        let buttons = Self::help_bar_buttons();
-
-        // Calculate total width: "[label1] [label2] [label3]..."
-        let total_len: u16 = buttons
-            .iter()
-            .enumerate()
-            .map(|(i, (label, _))| {
-                let bracket_len = if i < buttons.len() - 1 { 3 } else { 2 }; // "[] " or "[]"
-                label.len() as u16 + bracket_len as u16
-            })
-            .sum();
-        let section_start = width.saturating_sub(total_len);
-
-        // Find which button was clicked
-        let mut offset = section_start;
-        for (i, (label, _)) in buttons.iter().enumerate() {
-            let content_start = offset + 1; // skip '['
-            let content_end = content_start + label.len() as u16;
-            if inner_x >= content_start && inner_x < content_end {
-                return self.dispatch_global_action(buttons[i].1.clone());
-            }
-            offset = content_end + 1; // skip ']'
-            if i < buttons.len() - 1 {
-                offset += 1; // skip ' '
-            }
-        }
-
         false
     }
 
@@ -4693,7 +4732,7 @@ impl App {
             .unwrap_or_else(|| "?".to_string())
     }
 
-    fn render_help_bar(&self, f: &mut ratatui::Frame, area: Rect, fps_counter: &FPSCounter) {
+    fn render_help_bar(&mut self, f: &mut ratatui::Frame, area: Rect, fps_counter: &FPSCounter) {
         use crate::keybindings::action::Action;
         use crate::keybindings::context::KeyContext;
         use crate::notification::NotificationLevel;
@@ -4864,30 +4903,8 @@ impl App {
                 .fg(current_theme().base_03)
                 .bg(self.theme_background()),
         );
-        f.render_widget(left_para, inner_area);
-        if self.assistant_focused() || self.website_prompt.is_some() {
-            return;
-        }
-
-        let text_color = current_theme().base_03;
-        let buttons = Self::help_bar_buttons();
-        let mut spans = Vec::new();
-        for (i, (label, _)) in buttons.iter().enumerate() {
-            spans.push(Span::raw("["));
-            spans.push(Span::styled(
-                label.clone(),
-                Style::default()
-                    .fg(text_color)
-                    .add_modifier(Modifier::UNDERLINED),
-            ));
-            spans.push(Span::raw(if i < buttons.len() - 1 { "] " } else { "]" }));
-        }
-        let right_content = Line::from(spans);
-
-        let right_para = Paragraph::new(right_content)
-            .alignment(Alignment::Right)
-            .style(Style::default().bg(self.theme_background()));
-        f.render_widget(right_para, inner_area);
+        let text_area = self.render_help_bar_buttons(f, inner_area);
+        f.render_widget(left_para, text_area);
     }
 
     fn toggle_zen_mode(&mut self) {

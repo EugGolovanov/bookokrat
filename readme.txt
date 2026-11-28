@@ -4,6 +4,7 @@
 
   [LIBRARY]
     ▸ Automatic EPUB / PDF discovery in current directory
+    ▸ Click Website in the bottom bar to save an article for offline reading
     ▸ Open and keep a web article: bookokrat 'https://example.org/'
     ▸ Save without opening: bookokrat save URL -o article.epub
     ▸ Calibre library detection with metadata (titles, authors)
@@ -83,7 +84,7 @@ at the bottom of this document for the syntax.
 │  Space+h       Toggle reading history popup                                 │
 │  Space+d       Show book statistics popup                                   │
 │  Space+o       Open current book in system viewer                           │
-│  Space+u       Import a URL: Enter saves and opens; Ctrl+s saves only       │
+│  Space+u       Open Website (press Space, release it, then press u)         │
 │  Space+l       Lookup selected text (run configured shell command)          │
 │  Space+y       Open the Assistant tab (overlay in zen mode)                 │
 │  Space+w       Toggle file watching / auto-reload (PDF)                     │
@@ -271,6 +272,15 @@ Bookokrat provides full mouse integration:
     • Click-and-drag - Highlight text
     • Drag past edges - Auto-scroll viewport
     • Release on link - Follow hyperlink
+
+  [WEB ARTICLES]
+    • On first launch, press Esc to leave Help and reach the library.
+    • Click Website in the bottom bar, then paste an HTTP(S) article URL.
+      In Zen mode the bar is hidden; press Space, then u.
+    • Save & open (Enter) adds the EPUB to the active library and opens it.
+    • Save only (Ctrl+s) leaves the current book open.
+    • Close (Esc) dismisses the prompt. During a download, Hide (Esc)
+      keeps saving without opening the article.
 
   [IMAGES & INTERACTIVE]
     • Click image - Open in zoom popup

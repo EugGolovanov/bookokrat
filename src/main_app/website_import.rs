@@ -33,6 +33,21 @@ impl App {
         else {
             return;
         };
+        self.website_intent(intent);
+    }
+
+    pub(super) fn website_click(&mut self, col: u16, row: u16) {
+        if let Some(intent) = self
+            .website_prompt
+            .as_ref()
+            .and_then(|prompt| prompt.click(col, row, self.website_job.is_some()))
+        {
+            self.website_intent(intent);
+        }
+    }
+
+    fn website_intent(&mut self, intent: WebsiteIntent) {
+        self.key_sequence.clear();
         let open = match intent {
             WebsiteIntent::Open => true,
             WebsiteIntent::Save => false,
@@ -40,6 +55,12 @@ impl App {
                 self.close_website_prompt();
                 return;
             }
+        };
+        if self.website_job.is_some() {
+            return;
+        }
+        let Some(prompt) = &mut self.website_prompt else {
+            return;
         };
         let url = prompt.url().trim().to_owned();
         let dir = self.book_manager.library_directory().to_owned();
@@ -50,7 +71,7 @@ impl App {
                 let _ = tx.send((save_website(&url, &dir, None), open));
             }) {
             Ok(_) => {
-                prompt.error = None;
+                prompt.started_saving();
                 self.website_job = Some(rx);
             }
             Err(e) => prompt.error = Some(format!("Cannot start import: {e}")),

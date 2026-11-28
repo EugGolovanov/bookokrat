@@ -12,6 +12,8 @@ use image::{ImageFormat, ImageReader};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use url::Url;
 
+use super::public_images;
+
 const IMAGE_REQUESTS: usize = 24;
 const IMAGE_BYTES: usize = 4 * 1024 * 1024;
 const TOTAL_IMAGE_BYTES: usize = 24 * 1024 * 1024;
@@ -30,6 +32,7 @@ fn web_url(base: &Url, value: &str) -> Option<Url> {
 
 struct Images<'a> {
     agent: &'a ureq::Agent,
+    public_agent: Option<ureq::Agent>,
     book: &'a mut EpubBuilder<ZipLibrary>,
     paths: HashMap<Url, Option<String>>,
     bytes_left: usize,
@@ -41,11 +44,10 @@ impl Images<'_> {
         let Some(mut url) = web_url(base, src) else {
             return Ok(None);
         };
-        // Article markup must not direct background requests to other services.
-        if url.scheme() != base.scheme()
-            || url.host_str() != base.host_str()
-            || url.port() != base.port()
-        {
+        let same_origin = url.scheme() == base.scheme()
+            && url.host_str() == base.host_str()
+            && url.port() == base.port();
+        if !same_origin && (url.scheme() != "https" || url.port_or_known_default() != Some(443)) {
             return Ok(None);
         }
         url.set_fragment(None);
@@ -57,7 +59,12 @@ impl Images<'_> {
                 if n == IMAGE_REQUESTS || self.bytes_left == 0 || left.is_zero() {
                     return Ok(None);
                 }
-                let image = download_image(self.agent, entry.key(), left, &mut self.bytes_left);
+                let agent = if same_origin {
+                    self.agent
+                } else {
+                    self.public_agent.get_or_insert_with(public_images::agent)
+                };
+                let image = download_image(agent, entry.key(), left, &mut self.bytes_left);
                 let path = if let Some((bytes, ext, mime)) = image {
                     let path = format!("images/{n}.{ext}");
                     self.book.add_resource(&path, bytes.as_slice(), mime)?;
@@ -155,6 +162,7 @@ pub(super) fn build(
     let dom = parse_document(RcDom::default(), Default::default()).one(content);
     let mut images = Images {
         agent,
+        public_agent: None,
         book,
         paths: HashMap::new(),
         bytes_left: TOTAL_IMAGE_BYTES,

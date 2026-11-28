@@ -128,7 +128,9 @@ bookokrat article.epub                                # read offline
 
 Without `-o`, Bookokrat saves a URL-based `.epub` in the current directory. Opening the same URL there reuses the saved copy, even offline. To capture an updated version, use `save -o` with a new filename. Existing files are never overwritten.
 
-The importer extracts one HTML page and embeds supported images from the same origin. It does not crawl the site, execute JavaScript, or use browser login sessions.
+Figures are stored inside the EPUB and render inline, including offline. The importer can fetch PNG, JPEG, GIF, and WebP images from the page’s origin or a public HTTPS image host. `--no-images` keeps the reader text-only. If an older copy is missing figures, save the URL to a new filename with `-o`.
+
+Bookokrat extracts one HTML page. It does not crawl the site, execute JavaScript, or use browser login sessions.
 
 ### Reader controls
 

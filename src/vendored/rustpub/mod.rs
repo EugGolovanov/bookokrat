@@ -2,13 +2,15 @@
 // https://github.com/gicrisf/rustpub/tree/eb1753257b8fa76337004f27db7b97639fbfb857
 
 mod chapter;
+mod public_images;
 
 use std::{fs::File, time::Duration};
 
 use anyhow::{Context, Result, ensure};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ReferenceType, ZipLibrary};
-use html5ever::{parse_document, serialize, tendril::TendrilSink};
-use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
+use html5ever::tree_builder::{NodeOrText, TreeSink};
+use html5ever::{Attribute, QualName, parse_document, serialize, tendril::TendrilSink};
+use markup5ever_rcdom::{Handle, Node, NodeData, RcDom, SerializableHandle};
 use ureq::{Agent, ResponseExt};
 use url::Url;
 
@@ -92,21 +94,23 @@ struct PageMeta {
     og_author: Option<String>,
     author: Option<String>,
     language: Option<String>,
-    has_anchors: bool,
+    changed_dom: bool,
 }
 
 impl PageMeta {
     fn extract(html: &str, base: &Url) -> Result<(Self, readability::extractor::Product)> {
-        let dom = parse_document(RcDom::default(), Default::default())
+        let mut dom = parse_document(RcDom::default(), Default::default())
             .from_utf8()
             .read_from(&mut html.as_bytes())?;
         let mut meta = Self::default();
-        meta.visit(&dom.document, 0)?;
+        let mut document = dom.document.clone();
+        meta.visit(&mut dom, &mut document, 0, false)?;
+        drop(dom);
         let mut annotated = Vec::new();
-        let mut input = if meta.has_anchors {
+        let mut input = if meta.changed_dom {
             serialize(
                 &mut annotated,
-                &SerializableHandle::from(dom.document),
+                &SerializableHandle::from(document),
                 Default::default(),
             )?;
             annotated.as_slice()
@@ -118,17 +122,22 @@ impl PageMeta {
         Ok((meta, article))
     }
 
-    fn visit(&mut self, node: &Handle, depth: usize) -> Result<()> {
+    fn visit(
+        &mut self,
+        dom: &mut RcDom,
+        node: &mut Handle,
+        depth: usize,
+        mut in_figure: bool,
+    ) -> Result<()> {
         // Readability recursively traverses the DOM; reject excessive nesting before extraction.
         ensure!(depth <= 128, "website HTML is too deeply nested");
         if let NodeData::Element { name, attrs, .. } = &node.data {
+            if name.local.as_ref() == "img" && name.ns.as_ref() == "http://www.w3.org/1999/xhtml" {
+                self.changed_dom |= prepare_image(dom, node, in_figure);
+                return Ok(());
+            }
             let mut attrs = attrs.borrow_mut();
-            let attr = |key: &str| {
-                attrs
-                    .iter()
-                    .find(|a| a.name.local.as_ref() == key)
-                    .map(|a| a.value.as_ref())
-            };
+            let attr = |key: &str| attr(&attrs, key);
             match name.local.as_ref() {
                 "html" => self.language = attr("lang").and_then(xml_text),
                 "meta" => {
@@ -145,6 +154,8 @@ impl PageMeta {
                         *slot = attr("content").and_then(xml_text);
                     }
                 }
+                "figure" => in_figure = true,
+                "p" | "figcaption" => in_figure = false,
                 _ => {}
             }
             // Readability uses IDs for scoring, then strips them; retain offline link targets.
@@ -156,14 +167,98 @@ impl PageMeta {
                 anchor.name.local = ANCHOR_ATTR.into();
                 attrs.retain(|a| a.name.local.as_ref() != ANCHOR_ATTR);
                 attrs.push(anchor);
-                self.has_anchors = true;
+                self.changed_dom = true;
             }
         }
-        for child in node.children.borrow().iter() {
-            self.visit(child, depth + 1)?;
+        let mut children = node.children.borrow_mut();
+        children.retain(|child| {
+            let skip = excluded(child);
+            self.changed_dom |= skip;
+            !skip
+        });
+        for child in children.iter_mut() {
+            self.visit(dom, child, depth + 1, in_figure)?;
         }
         Ok(())
     }
+}
+
+fn attr<'a>(attrs: &'a [Attribute], key: &str) -> Option<&'a str> {
+    attrs
+        .iter()
+        .find(|a| a.name.local.as_ref() == key)
+        .map(|a| a.value.as_ref())
+}
+
+fn excluded(node: &Handle) -> bool {
+    let NodeData::Element { name, attrs, .. } = &node.data else {
+        return false;
+    };
+    matches!(
+        name.local.as_ref(),
+        "nav" | "script" | "template" | "noscript" | "style" | "button" | "form"
+    ) || attrs.borrow().iter().any(|a| match a.name.local.as_ref() {
+        "hidden" => true,
+        "role" => a.value.eq_ignore_ascii_case("navigation"),
+        "class" => a.value.split_ascii_whitespace().any(|c| c == "hidden"),
+        "style" => a
+            .value
+            .split(';')
+            .filter_map(|s| s.split_once(':'))
+            .any(|(k, v)| {
+                let value = v.split('!').next().unwrap_or_default().trim();
+                (k.trim().eq_ignore_ascii_case("display") && value.eq_ignore_ascii_case("none"))
+                    || (k.trim().eq_ignore_ascii_case("visibility")
+                        && value.eq_ignore_ascii_case("hidden"))
+            }),
+        _ => false,
+    })
+}
+
+fn prepare_image(dom: &mut RcDom, node: &mut Handle, in_figure: bool) -> bool {
+    let NodeData::Element { name, attrs, .. } = &node.data else {
+        return false;
+    };
+    let mut attrs = attrs.borrow_mut();
+    let lazy = ["data-src", "data-original"].iter().find_map(|key| {
+        attrs
+            .iter()
+            .position(|a| a.name.local.as_ref() == *key && !a.value.trim().is_empty())
+    });
+    if let Some(i) = lazy {
+        // Keep the publisher's equation text without spending a figure download on a GIF.
+        if attr(&attrs, "role").is_some_and(|v| v.eq_ignore_ascii_case("math"))
+            && let Some(alt) = attrs
+                .iter()
+                .find(|a| a.name.local.as_ref() == "alt" && !a.value.trim().is_empty())
+        {
+            let text = Node::new(NodeData::Text {
+                contents: alt.value.clone().into(),
+            });
+            drop(attrs);
+            text.parent.set(node.parent.take());
+            *node = text;
+            return true;
+        }
+        let mut src = attrs.swap_remove(i);
+        src.name.local = "src".into();
+        attrs.retain(|a| a.name.local.as_ref() != "src");
+        attrs.push(src);
+    }
+    if in_figure {
+        // Readability drops image-only divs when their images outnumber their paragraphs.
+        let paragraph = dom.create_element(
+            QualName::new(None, name.ns.clone(), "p".into()),
+            Vec::new(),
+            Default::default(),
+        );
+        drop(attrs);
+        paragraph.parent.set(node.parent.take());
+        let image = std::mem::replace(node, paragraph);
+        dom.append(node, NodeOrText::AppendNode(image));
+        return true;
+    }
+    lazy.is_some()
 }
 
 fn xml_text(value: &str) -> Option<String> {

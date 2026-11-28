@@ -281,6 +281,9 @@ Bookokrat provides full mouse integration:
     • Save only (Ctrl+s) leaves the current book open.
     • Close (Esc) dismisses the prompt. During a download, Hide (Esc)
       keeps saving without opening the article.
+    • Embedded figures appear inline, even offline. Launch without
+      --no-images to see them. For a copy saved before figures were included,
+      run bookokrat save URL -o illustrated.epub, then open the new file.
 
   [IMAGES & INTERACTIVE]
     • Click image - Open in zoom popup

@@ -56,6 +56,8 @@ pub enum Action {
     OpenSettings,
     OpenThemeSelector,
     OpenExternalViewer,
+    OpenWebsite,
+    SaveWebsite,
     ShrinkNavPanel,
     ExpandNavPanel,
     ResetNavPanelWidth,
@@ -213,6 +215,8 @@ impl Action {
         Action::OpenSettings,
         Action::OpenThemeSelector,
         Action::OpenExternalViewer,
+        Action::OpenWebsite,
+        Action::SaveWebsite,
         Action::ShrinkNavPanel,
         Action::ExpandNavPanel,
         Action::ResetNavPanelWidth,
@@ -363,6 +367,8 @@ impl Action {
             OpenSettings => "Open the settings popup",
             OpenThemeSelector => "Open the theme selector popup",
             OpenExternalViewer => "Open the current book in an external viewer",
+            OpenWebsite => "Enter a website URL to save or open",
+            SaveWebsite => "Save the website to the library without opening it",
             ShrinkNavPanel => "Shrink the navigation panel by one step",
             ExpandNavPanel => "Expand the navigation panel by one step",
             ResetNavPanelWidth => "Reset the navigation panel to its default width",
@@ -524,7 +530,7 @@ mod tests {
                 ToggleHelp | ToggleReadingHistory | ToggleBookStats | ToggleZenMode
                 | ToggleCommentsViewer => a,
                 OpenBookSearch | OpenBookSearchFresh | OpenSettings | OpenThemeSelector
-                | OpenExternalViewer => a,
+                | OpenExternalViewer | OpenWebsite | SaveWebsite => a,
                 ShrinkNavPanel | ExpandNavPanel | ResetNavPanelWidth => a,
                 ToggleAssistant | AssistantSubmit | AssistantCancel | AssistantApprove
                 | AssistantDeny | AssistantRemoveQuote => a,

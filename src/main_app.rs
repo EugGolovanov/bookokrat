@@ -1,4 +1,5 @@
 mod assistant_panel;
+mod website_import;
 use crate::book_manager::{BookFormat, BookManager};
 use crate::book_search::{BookSearch, BookSearchAction};
 use crate::book_stat::{BookStat, BookStatAction};
@@ -250,6 +251,8 @@ pub struct App {
     pub book_manager: BookManager,
     pub navigation_panel: NavigationPanel,
     assistant: ReaderAssistant,
+    website_prompt: Option<crate::widget::website_prompt::WebsitePrompt>,
+    website_job: Option<std::sync::mpsc::Receiver<(Result<PathBuf>, bool)>>,
     text_reader: MarkdownTextReader,
     home_context: LibraryContext,
     book_images: BookImages,
@@ -431,6 +434,7 @@ pub enum PopupWindow {
     Settings,
     Lookup,
     Assistant,
+    Website,
     KeybindingErrors,
 }
 
@@ -755,6 +759,8 @@ impl App {
             book_manager,
             navigation_panel,
             assistant: ReaderAssistant::default(),
+            website_prompt: None,
+            website_job: None,
             text_reader,
             home_context,
             book_images,
@@ -2717,6 +2723,9 @@ impl App {
 
     /// Handle non-scroll mouse events (clicks, drags, etc.)
     fn handle_non_scroll_mouse_event(&mut self, mouse_event: MouseEvent) {
+        if self.website_prompt.is_some() {
+            return;
+        }
         if self.handle_assistant_mouse(mouse_event) {
             return;
         }
@@ -4295,6 +4304,9 @@ impl App {
             }
         }
 
+        if let Some(prompt) = &mut self.website_prompt {
+            prompt.render(f, self.website_job.is_some());
+        }
         if self.assistant_overlay() {
             let area = self.assistant_overlay_area();
             self.assistant.widget.render(f, area, true, current_theme());
@@ -4523,6 +4535,23 @@ impl App {
             .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(self.theme_background()));
 
+        let shortcut = self
+            .book_manager
+            .books
+            .is_empty()
+            .then(|| {
+                crate::keybindings::keymap().describe_binding_display(
+                    crate::keybindings::context::KeyContext::Global,
+                    &crate::keybindings::action::Action::OpenWebsite,
+                )
+            })
+            .flatten();
+        let content = match shortcut {
+            Some(key) => {
+                std::borrow::Cow::Owned(format!("{content}\n{key}: Open or save a web article"))
+            }
+            None => std::borrow::Cow::Borrowed(content),
+        };
         let paragraph = Paragraph::new(content)
             .block(content_border)
             .style(Style::default().fg(text_color).bg(self.theme_background()));
@@ -4792,6 +4821,10 @@ impl App {
                     format!("{tab}/{hl}: Tabs | {jk}: Navigate | {sel}: Apply | {esc}: Close")
                 }
                 FocusedPanel::Popup(PopupWindow::Assistant) => self.assistant_help(),
+                FocusedPanel::Popup(PopupWindow::Website) => format!(
+                    "Article library: {}",
+                    self.book_manager.library_directory().display()
+                ),
                 FocusedPanel::Popup(PopupWindow::Lookup) => {
                     let ctx = KeyContext::PopupHelp;
                     let jk = Self::key_pair(ctx, Action::MoveDown, Action::MoveUp);
@@ -4832,7 +4865,7 @@ impl App {
                 .bg(self.theme_background()),
         );
         f.render_widget(left_para, inner_area);
-        if self.assistant_focused() {
+        if self.assistant_focused() || self.website_prompt.is_some() {
             return;
         }
 
@@ -5007,6 +5040,10 @@ impl App {
         use crate::keybindings::action::Action;
 
         match action {
+            Action::OpenWebsite => {
+                self.open_website_prompt();
+                true
+            }
             Action::ToggleAssistant => {
                 self.toggle_assistant();
                 true
@@ -6214,6 +6251,10 @@ impl App {
     }
 
     pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
+        if self.website_prompt.is_some() {
+            self.website_key(key);
+            return None;
+        }
         if self.assistant_focused() {
             self.assistant_key(key);
             return None;
@@ -8381,14 +8422,14 @@ where
     }
     app.sync_terminal_title();
     loop {
-        let editing_assistant = app.assistant_focused();
-        if paste_enabled != editing_assistant {
-            if editing_assistant {
+        let editing_text = app.assistant_focused() || app.website_prompt.is_some();
+        if paste_enabled != editing_text {
+            if editing_text {
                 execute!(stdout(), crossterm::event::EnableBracketedPaste)?;
             } else {
                 execute!(stdout(), crossterm::event::DisableBracketedPaste)?;
             }
-            paste_enabled = editing_assistant;
+            paste_enabled = editing_text;
         }
         let mut events_processed = 0;
         let mut should_quit = false;
@@ -8414,6 +8455,15 @@ where
                 continue;
             }
 
+            if let Some(prompt) = &mut app.website_prompt
+                && let Event::Paste(text) = &event
+            {
+                if app.website_job.is_none() {
+                    app.key_sequence.clear();
+                    prompt.paste(text);
+                }
+                continue;
+            }
             if let Event::Paste(text) = &event
                 && app.assistant_focused()
             {
@@ -8683,6 +8733,7 @@ where
 
         if last_tick.elapsed() >= tick_rate {
             needs_redraw |= app.poll_assistant();
+            needs_redraw |= app.poll_website_import();
             needs_redraw |= app
                 .settings_popup
                 .as_mut()
@@ -8759,6 +8810,7 @@ where
                 .is_some();
             if !hud_active
                 && !app.assistant_visible()
+                && app.website_prompt.is_none()
                 && app.focused_panel != FocusedPanel::Popup(PopupWindow::Settings)
             {
                 needs_redraw = false;

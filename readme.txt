@@ -83,6 +83,7 @@ at the bottom of this document for the syntax.
 │  Space+h       Toggle reading history popup                                 │
 │  Space+d       Show book statistics popup                                   │
 │  Space+o       Open current book in system viewer                           │
+│  Space+u       Import a URL: Enter saves and opens; Ctrl+s saves only       │
 │  Space+l       Lookup selected text (run configured shell command)          │
 │  Space+y       Open the Assistant tab (overlay in zen mode)                 │
 │  Space+w       Toggle file watching / auto-reload (PDF)                     │

@@ -91,6 +91,43 @@ fn simulate(app: &mut App, notation: &str) -> Option<AppAction> {
     result
 }
 
+fn prepare_offline_article(app: &mut App, dir: &TempDir) {
+    const URL: &str = "http://127.0.0.1:0/notes";
+    let name = format!(
+        "web-notes-{}.epub",
+        &format!("{:x}", md5::compute(URL))[..16]
+    );
+    std::fs::copy(
+        "tests/testdata/digital_frontier.epub",
+        dir.path().join(name),
+    )
+    .unwrap();
+    *app = App::new_with_config_and_settings(
+        dir.path().to_str(),
+        None,
+        false,
+        None,
+        Some(dir.path().to_owned()),
+        RuntimeSettings::in_memory(Settings::default()),
+    );
+    app.set_test_mode(true);
+    simulate(app, "<Space>u");
+    for c in URL.chars() {
+        press_char(app, c);
+    }
+}
+
+fn finish_cached_import(app: &mut App) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !app.poll_website_import() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "offline import did not complete"
+        );
+        std::thread::yield_now();
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Macro: generates tests + tested-bindings list
 // ═══════════════════════════════════════════════════════════════
@@ -139,6 +176,22 @@ macro_rules! binding_tests {
 
 binding_tests! {
     // ── Global ───────────────────────────────────────
+    website_prompt_from_library: KeyContext::Global, "<Space>u",
+        setup = |_app, _dir| {},
+        check = |app| app.focused_panel == FocusedPanel::Popup(PopupWindow::Website);
+    website_escape_restores_reader: KeyContext::Website, "<Esc>",
+        setup = |app, _dir| { open_book(&mut app); simulate(&mut app, "<Space>u"); press_char(&mut app, 'q'); },
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::Content);
+    website_open_offline_article: KeyContext::Website, "<CR>",
+        setup = |app, dir| prepare_offline_article(&mut app, &dir),
+        after = |app| finish_cached_import(app),
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::Content)
+            && app.navigation_panel.current_book_path.is_some();
+    website_save_without_opening: KeyContext::Website, "<C-s>",
+        setup = |app, dir| prepare_offline_article(&mut app, &dir),
+        after = |app| finish_cached_import(app),
+        check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::NavigationList)
+            && app.navigation_panel.current_book_path.is_none() && app.has_notification();
     assistant_open_from_reader: KeyContext::Global, "<Space>y",
         setup = |app, _dir| { open_book(&mut app); },
         check = |app| app.focused_panel == FocusedPanel::Main(MainPanel::NavigationList);

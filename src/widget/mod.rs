@@ -16,3 +16,4 @@ pub mod popup;
 pub mod reading_history;
 pub mod settings_popup;
 pub mod text_reader;
+pub(crate) mod website_prompt;

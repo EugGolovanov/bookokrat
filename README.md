@@ -110,6 +110,10 @@ bookokrat path/to/book.epub --no-images   # text only; PDF and DJVU can't be ope
 
 ### Read or save a web article
 
+In the reader or library, press `Space` then `u` and paste an HTTP(S) URL. Press `Enter` to save the EPUB in the active library and open it, or `Ctrl+s` to save without switching books. `Esc` closes the prompt. If the download has started, it continues without opening the article.
+
+From the command line:
+
 ```bash
 bookokrat 'https://example.org/'                      # save and open
 bookokrat save 'https://example.org/' -o article.epub  # save only

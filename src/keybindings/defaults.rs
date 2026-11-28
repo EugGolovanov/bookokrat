@@ -45,6 +45,7 @@ pub fn default_keymap() -> Keymap {
     pdf_specifics(&mut keymap);
     pdf_normal_specifics(&mut keymap);
     assistant_specifics(&mut keymap);
+    website_specifics(&mut keymap);
     popup_help_specifics(&mut keymap);
     popup_history_specifics(&mut keymap);
     popup_search_specifics(&mut keymap);
@@ -122,6 +123,7 @@ fn global_specifics(keymap: &mut Keymap) {
     bind!(ctx, "<Space>f" => Action::OpenBookSearch);
     bind!(ctx, "<Space>F" => Action::OpenBookSearchFresh);
     bind!(ctx, "<Space>o" => Action::OpenExternalViewer);
+    bind!(ctx, "<Space>u" => Action::OpenWebsite);
     bind!(ctx, "<Space>c" => Action::CopyChapterText);
     bind!(ctx, "<Space>C" => Action::CopyTocItem);
     bind!(ctx, "<Space>j" => Action::ToggleJustifyText);
@@ -160,6 +162,13 @@ fn assistant_specifics(keymap: &mut Keymap) {
     bind!(ctx, "<C-x>" => Action::AssistantRemoveQuote);
     bind!(ctx, "<PageUp>" => Action::ScrollPageUp);
     bind!(ctx, "<PageDown>" => Action::ScrollPageDown);
+}
+
+fn website_specifics(keymap: &mut Keymap) {
+    let ctx = keymap.context_mut(KeyContext::Website);
+    bind!(ctx, "<CR>" => Action::Select);
+    bind!(ctx, "<C-s>" => Action::SaveWebsite);
+    bind!(ctx, "<Esc>" => Action::Cancel);
 }
 
 fn nav_specifics(keymap: &mut Keymap) {

@@ -56,23 +56,29 @@ impl BookManager {
     /// library doesn't delay startup. `poll_scan` applies the result.
     pub fn new_with_directory_in_background(directory: &str, settings: RuntimeSettings) -> Self {
         let mut manager = Self::without_books(directory, settings);
+        manager.refresh_in_background();
+        manager
+    }
+
+    pub fn library_directory(&self) -> &Path {
+        Path::new(&self.scan_directory)
+    }
+
+    pub fn refresh_in_background(&mut self) {
         let (tx, rx) = mpsc::channel();
-        let scan_directory = manager.scan_directory.clone();
-        let library_mode = manager.library_mode;
+        let scan_directory = self.scan_directory.clone();
+        let library_mode = self.library_mode;
+        let worker_tx = tx.clone();
         let spawned = std::thread::Builder::new()
             .name("library-scan".to_string())
             .spawn(move || {
-                let _ = tx.send(Self::scan(&scan_directory, library_mode));
+                let _ = worker_tx.send(Self::scan(&scan_directory, library_mode));
             });
-        match spawned {
-            Ok(_) => manager.pending_scan = Some(rx),
-            Err(e) => {
-                error!("Failed to spawn library scan thread, scanning synchronously: {e}");
-                manager.books =
-                    Self::scan(&manager.scan_directory, manager.library_mode).unwrap_or_default();
-            }
+        if let Err(e) = spawned {
+            error!("Failed to spawn library scan thread, scanning synchronously: {e}");
+            let _ = tx.send(Self::scan(&self.scan_directory, self.library_mode));
         }
-        manager
+        self.pending_scan = Some(rx);
     }
 
     fn without_books(directory: &str, settings: RuntimeSettings) -> Self {
@@ -777,6 +783,30 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, contents.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn refresh_replaces_a_pending_scan_without_clearing_visible_books() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir.path().join("first.epub"), "");
+        let settings = RuntimeSettings::in_memory(crate::settings::Settings::default());
+        let mut manager = BookManager::new_with_directory(dir.path().to_str().unwrap(), settings);
+        let stale = manager.start_controlled_scan();
+        stale.send(Ok(Vec::new())).unwrap();
+        write_file(&manager.library_directory().join("second.epub"), "");
+
+        manager.refresh_in_background();
+
+        assert!(stale.send(Ok(Vec::new())).is_err());
+        assert_eq!(manager.books.len(), 1);
+        let refreshed = manager
+            .pending_scan
+            .take()
+            .unwrap()
+            .recv()
+            .unwrap()
+            .unwrap();
+        assert_eq!(refreshed.len(), 2);
     }
 
     #[test]

@@ -141,7 +141,7 @@ fn apply_toml(content: &str, keymap: &mut Keymap, errors: &mut Vec<LoadError>) -
         let Some(group) = super::context::resolve_config_key(key) else {
             errors.push(LoadError::with_line(
                 find_context_line(content, key).unwrap_or(1),
-                format!("unknown context '{key}' (valid: global, nav, content, epub_normal, pdf, pdf_normal, assistant, popup.help, popup.history, popup.search, popup.stats, popup.comments, popup.settings, popup.marks, or groups all/normal/popup)"),
+                format!("unknown context '{key}' (valid: global, nav, content, epub_normal, pdf, pdf_normal, assistant, website, popup.help, popup.history, popup.search, popup.stats, popup.comments, popup.settings, popup.marks, or groups all/normal/popup)"),
             ));
             continue;
         };
@@ -291,7 +291,7 @@ pub fn print_default_keybindings() -> String {
     out.push_str("# Use \"nop\" as the action to disable a default.\n");
     out.push_str("#\n");
     out.push_str("# Groups (apply before per-context overrides):\n");
-    out.push_str("#   all    -> every context except `global`\n");
+    out.push_str("#   all    -> every context except `global`, `assistant`, and `website`\n");
     out.push_str("#   normal -> epub_normal + pdf_normal\n");
     out.push_str("#   popup  -> every popup.* context\n");
     out.push('\n');
@@ -347,7 +347,7 @@ pub fn print_default_keybindings_grouped() -> String {
     out.push_str("# Use \"nop\" as the action to disable a default.\n");
     out.push_str("#\n");
     out.push_str("# Groups (apply before per-context overrides):\n");
-    out.push_str("#   all    -> every context except `global`\n");
+    out.push_str("#   all    -> every context except `global`, `assistant`, and `website`\n");
     out.push_str("#   normal -> epub_normal + pdf_normal\n");
     out.push_str("#   popup  -> every popup.* context\n");
 
@@ -620,6 +620,27 @@ content."j" = "scroll_up"
         assert_eq!(
             lookup(&keymap, KeyContext::PopupHistory, "q"),
             LookupResult::NoMatch
+        );
+    }
+
+    #[test]
+    fn website_editor_only_inherits_explicit_website_bindings() {
+        let src = r#"
+all."j" = "move_down"
+popup."q" = "cancel"
+website."<CR>" = "nop"
+website."<C-x><CR>" = "select"
+"#;
+        let keymap = make_keymap_with_toml(src);
+        for key in ["j", "q", "<CR>"] {
+            assert_eq!(
+                lookup(&keymap, KeyContext::Website, key),
+                LookupResult::NoMatch
+            );
+        }
+        assert_eq!(
+            lookup(&keymap, KeyContext::Website, "<C-x><CR>"),
+            LookupResult::Found(Action::Select)
         );
     }
 

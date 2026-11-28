@@ -108,6 +108,20 @@ bookokrat path/to/book.epub --zen-mode
 bookokrat path/to/book.epub --no-images   # text only; PDF and DJVU can't be opened
 ```
 
+### Read or save a web article
+
+```bash
+bookokrat 'https://example.org/'                      # save and open
+bookokrat save 'https://example.org/' -o article.epub  # save only
+bookokrat article.epub                                # read offline
+```
+
+Without `-o`, Bookokrat saves a URL-based `.epub` in the current directory. Opening the same URL there reuses the saved copy, even offline. To capture an updated version, use `save -o` with a new filename. Existing files are never overwritten.
+
+The importer extracts one HTML page and embeds supported images from the same origin. It does not crawl the site, execute JavaScript, or use browser login sessions.
+
+### Reader controls
+
 Press `?` inside the app to open the built-in help.
 
 EPUBs open in a two-page spread when the reader pane has at least 67 usable columns. Narrower panes show one page. Press `Space` then `D` to switch layouts, or `Space` then `z` to give the reader the full window.
@@ -184,6 +198,8 @@ Typical `<data_dir>` paths:
 
 `tui-textarea` is vendored in `vendor/tui-textarea` because upstream is currently unmaintained and behind current `ratatui` compatibility. The vendored base comes from PR #118:
 https://github.com/rhysd/tui-textarea/pull/118/changes
+
+The native web importer adapts [Rustpub](https://github.com/gicrisf/rustpub/tree/eb1753257b8fa76337004f27db7b97639fbfb857) for use without its CLI or working-directory templates. Its MIT notice is in [`src/vendored/rustpub/LICENSE`](src/vendored/rustpub/LICENSE).
 
 ## Attribution
 

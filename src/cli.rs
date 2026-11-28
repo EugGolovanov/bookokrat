@@ -6,7 +6,7 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    /// EPUB or PDF file to open, or - to read it from stdin
+    /// EPUB, PDF, DjVu, - for stdin, or an HTTP(S) article URL to save and open
     pub file: Option<String>,
 
     /// Directory to use as the library (defaults to current directory)
@@ -53,6 +53,16 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Save a web article as an EPUB without opening the reader
+    Save {
+        /// HTTP(S) URL of the article
+        url: String,
+
+        /// EPUB path (defaults to a URL-based name in the current directory)
+        #[arg(long, short = 'o')]
+        output: Option<std::path::PathBuf>,
+    },
+
     /// Print book content, TOC, or metadata to stdout
     Print {
         /// EPUB or PDF file, or - to read it from stdin

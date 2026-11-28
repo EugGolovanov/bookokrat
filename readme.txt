@@ -4,6 +4,8 @@
 
   [LIBRARY]
     ▸ Automatic EPUB / PDF discovery in current directory
+    ▸ Open and keep a web article: bookokrat 'https://example.org/'
+    ▸ Save without opening: bookokrat save URL -o article.epub
     ▸ Calibre library detection with metadata (titles, authors)
     ▸ Libraries with multiple source directories
     ▸ EPUB bundle support (exploded .epub directories, Apple Books exports)

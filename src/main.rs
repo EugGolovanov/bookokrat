@@ -1,6 +1,6 @@
 use std::{fs::OpenOptions, io::stdout, path::Path, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use crossterm::{
     event::EnableMouseCapture,
@@ -15,6 +15,8 @@ mod cli;
 mod extract;
 mod piped_input;
 mod print;
+#[path = "vendored/rustpub/mod.rs"]
+mod rustpub;
 
 // Use modules from the library crate
 use bookokrat::config_migration::{self, FileMoveMigration, Migration};
@@ -80,6 +82,66 @@ fn build_config_migrations() -> Vec<Box<dyn Migration>> {
     // stub via `write_template_if_missing()`.
 
     out
+}
+
+fn save_website(input: &str, output: Option<&Path>) -> Result<PathBuf> {
+    let mut url = url::Url::parse(input).context("expected an HTTP(S) article URL")?;
+    ensure!(
+        matches!(url.scheme(), "http" | "https") && url.host().is_some(),
+        "expected an HTTP(S) article URL"
+    );
+    ensure!(
+        url.username().is_empty() && url.password().is_none(),
+        "article URLs must not contain credentials"
+    );
+    url.set_fragment(None);
+
+    let path = if let Some(output) = output {
+        ensure!(
+            output
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("epub")),
+            "output must have an .epub extension"
+        );
+        ensure!(!output.try_exists()?, "{} already exists", output.display());
+        output.to_owned()
+    } else {
+        let label = url
+            .path_segments()
+            .and_then(|mut p| p.rfind(|p| !p.is_empty()))
+            .or(url.host_str())
+            .unwrap_or("article");
+        let slug: String = label
+            .chars()
+            .take(60)
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let hash = format!("{:x}", md5::compute(url.as_str()));
+        let path = PathBuf::from(format!("web-{slug}-{}.epub", &hash[..16]));
+        if path.is_file() {
+            return Ok(path);
+        }
+        path
+    };
+
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut partial = tempfile::NamedTempFile::new_in(dir)
+        .with_context(|| format!("cannot create an EPUB in {}", dir.display()))?;
+    eprintln!("Saving article to {}", path.display());
+    rustpub::convert(&url, partial.as_file_mut()).context("could not convert web article")?;
+    partial
+        .persist_noclobber(&path)
+        .with_context(|| format!("cannot save {}", path.display()))?;
+    Ok(path)
 }
 
 /// Path to open for a FILE argument: itself, or a temp copy when it is stdin or a pipe.
@@ -154,7 +216,7 @@ fn main() -> Result<()> {
     // Initialize panic handler first, before any other setup
     panic_handler::initialize_panic_handler();
 
-    let args = cli::Cli::parse();
+    let mut args = cli::Cli::parse();
 
     // Print defaults and exit — no TUI setup needed.
     if args.print_default_keybindings {
@@ -175,6 +237,10 @@ fn main() -> Result<()> {
     // Handle subcommands before TUI setup
     if let Some(ref command) = args.command {
         match command {
+            cli::Command::Save { url, output } => {
+                println!("{}", save_website(url, output.as_deref())?.display());
+                return Ok(());
+            }
             cli::Command::Print {
                 file,
                 toc,
@@ -201,6 +267,18 @@ fn main() -> Result<()> {
     // Before any terminal detection, which caches its results.
     if args.no_images {
         bookokrat::terminal::disable_images();
+    }
+
+    if let Some(input) = args.file.as_deref()
+        && input.split_once("://").is_some_and(|(scheme, _)| {
+            scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+        })
+    {
+        ensure!(
+            !args.continue_reading,
+            "cannot combine a URL with --continue-reading"
+        );
+        args.file = Some(save_website(input, None)?.to_string_lossy().into_owned());
     }
 
     // A piped document is read from its own library, not from where it came from.
